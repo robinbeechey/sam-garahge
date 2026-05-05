@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_SANDBOX_MODEL,
+  filterModelsForAgentLoop,
   type ModelAllowedScope,
   PLATFORM_AI_MODELS,
+  type PlatformAIModel,
   type ToolCallSupport,
 } from '../../src/constants/ai-services';
 
@@ -229,6 +232,131 @@ describe('AI Model Registry', () => {
       );
       // Sonnet is alone in its group (anthropic-standard) — this is valid
       expect(sameGroup.length).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('filterModelsForAgentLoop', () => {
+    const mockModels: PlatformAIModel[] = [
+      {
+        id: 'model-excellent',
+        label: 'Excellent Model',
+        provider: 'anthropic',
+        tier: 'standard',
+        costPer1kInputTokens: 0.003,
+        costPer1kOutputTokens: 0.015,
+        contextWindow: 200000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace', 'project'],
+        unifiedApiModelId: 'anthropic/test-model',
+      },
+      {
+        id: 'model-good',
+        label: 'Good Model',
+        provider: 'workers-ai',
+        tier: 'free',
+        costPer1kInputTokens: 0,
+        costPer1kOutputTokens: 0,
+        contextWindow: 32768,
+        toolCallSupport: 'good',
+        intendedRole: 'workspace-agent',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace', 'project'],
+        unifiedApiModelId: null,
+      },
+      {
+        id: 'model-limited',
+        label: 'Limited Model',
+        provider: 'workers-ai',
+        tier: 'free',
+        costPer1kInputTokens: 0,
+        costPer1kOutputTokens: 0,
+        contextWindow: 131072,
+        toolCallSupport: 'limited',
+        intendedRole: 'utility',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace'],
+        unifiedApiModelId: null,
+      },
+      {
+        id: 'model-none',
+        label: 'No Tool Model',
+        provider: 'workers-ai',
+        tier: 'free',
+        costPer1kInputTokens: 0,
+        costPer1kOutputTokens: 0,
+        contextWindow: 8192,
+        toolCallSupport: 'none',
+        intendedRole: 'utility',
+        fallbackGroup: 'test',
+        allowedScopes: ['workspace'],
+        unifiedApiModelId: null,
+      },
+    ];
+
+    it('filters to models with good or better tool-call support by default', () => {
+      const result = filterModelsForAgentLoop(mockModels);
+
+      expect(result.map((model) => model.id)).toEqual(['model-excellent', 'model-good']);
+    });
+
+    it('filters to excellent only when minSupport is excellent', () => {
+      const result = filterModelsForAgentLoop(mockModels, { minSupport: 'excellent' });
+
+      expect(result.map((model) => model.id)).toEqual(['model-excellent']);
+    });
+
+    it('includes limited when minSupport is limited', () => {
+      const result = filterModelsForAgentLoop(mockModels, { minSupport: 'limited' });
+
+      expect(result.map((model) => model.id)).toEqual([
+        'model-excellent',
+        'model-good',
+        'model-limited',
+      ]);
+    });
+
+    it('includes all models when minSupport is none', () => {
+      const result = filterModelsForAgentLoop(mockModels, { minSupport: 'none' });
+
+      expect(result).toHaveLength(4);
+    });
+
+    it('filters by scope when provided', () => {
+      const result = filterModelsForAgentLoop(mockModels, { scope: 'project' });
+
+      expect(result.map((model) => model.id)).toEqual(['model-excellent', 'model-good']);
+    });
+
+    it('combines scope and minSupport filters', () => {
+      const result = filterModelsForAgentLoop(mockModels, {
+        scope: 'project',
+        minSupport: 'excellent',
+      });
+
+      expect(result.map((model) => model.id)).toEqual(['model-excellent']);
+    });
+
+    it('returns an empty array when no models match', () => {
+      const result = filterModelsForAgentLoop(mockModels, { scope: 'top-level' });
+
+      expect(result).toHaveLength(0);
+    });
+
+    it('works with the real platform model registry', () => {
+      const agentModels = filterModelsForAgentLoop(PLATFORM_AI_MODELS);
+
+      expect(agentModels.length).toBeGreaterThan(0);
+      for (const model of agentModels) {
+        expect(['excellent', 'good']).toContain(model.toolCallSupport);
+      }
+    });
+
+    it('keeps the sandbox default eligible for agent-loop execution', () => {
+      const agentModelIds = filterModelsForAgentLoop(PLATFORM_AI_MODELS).map((model) => model.id);
+
+      expect(agentModelIds).toContain(DEFAULT_SANDBOX_MODEL);
     });
   });
 });
