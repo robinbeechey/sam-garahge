@@ -1397,6 +1397,37 @@ exit 1
 	}
 }
 
+func TestHasMergedRuntimeSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		merged map[string]interface{}
+		want   bool
+	}{
+		{"empty map", map[string]interface{}{}, false},
+		{"nil map", nil, false},
+		{"top-level image", map[string]interface{}{"image": "node:20"}, true},
+		{"top-level dockerFile", map[string]interface{}{"dockerFile": "Dockerfile"}, true},
+		{"top-level dockerComposeFile", map[string]interface{}{"dockerComposeFile": "docker-compose.yml"}, true},
+		{"build.dockerfile", map[string]interface{}{"build": map[string]interface{}{"dockerfile": "Dockerfile"}}, true},
+		{"build.dockerfile with context", map[string]interface{}{"build": map[string]interface{}{"dockerfile": "Dockerfile", "context": ".."}}, true},
+		{"build without dockerfile", map[string]interface{}{"build": map[string]interface{}{"context": ".."}}, false},
+		{"build empty dockerfile", map[string]interface{}{"build": map[string]interface{}{"dockerfile": ""}}, false},
+		{"no runtime source", map[string]interface{}{"name": "My Config", "features": map[string]interface{}{}}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := hasMergedRuntimeSource(tt.merged)
+			if got != tt.want {
+				t.Fatalf("hasMergedRuntimeSource(%v) = %v, want %v", tt.merged, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseDevcontainerReadConfigurationOutput(t *testing.T) {
 	t.Parallel()
 

@@ -1197,6 +1197,19 @@ func hasMergedRuntimeSource(merged map[string]interface{}) bool {
 		}
 	}
 
+	// Also check for the "build" object — devcontainer configs using
+	// "build": { "dockerfile": "..." } place the runtime source under a
+	// nested "build" key rather than a top-level "dockerFile".
+	if buildVal, ok := merged["build"]; ok {
+		if buildMap, ok := buildVal.(map[string]interface{}); ok {
+			if df, ok := buildMap["dockerfile"]; ok {
+				if s, ok := df.(string); ok && strings.TrimSpace(s) != "" {
+					return true
+				}
+			}
+		}
+	}
+
 	return false
 }
 
