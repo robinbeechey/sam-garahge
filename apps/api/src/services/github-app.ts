@@ -147,9 +147,12 @@ export async function generateAppJWT(env: Env): Promise<string> {
  */
 export async function getInstallationToken(
   installationId: string,
-  env: Env
+  env: Env,
+  extraPermissions?: Record<string, string>,
 ): Promise<{ token: string; expiresAt: string }> {
   const jwt = await generateAppJWT(env);
+
+  const body = extraPermissions ? JSON.stringify({ permissions: extraPermissions }) : undefined;
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
@@ -160,7 +163,9 @@ export async function getInstallationToken(
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'Simple-Agent-Manager',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
+      ...(body ? { body } : {}),
     }
   );
 

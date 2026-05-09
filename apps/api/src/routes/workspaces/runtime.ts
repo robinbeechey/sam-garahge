@@ -557,7 +557,14 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     throw errors.notFound('GitHub installation');
   }
 
-  const token = await getInstallationToken(installation.installationId, c.env);
+  // Request packages:write when devcontainer caching is enabled so the
+  // VM agent can push cache images to GHCR on behalf of this installation.
+  const cacheEnabled = c.env.DEVCONTAINER_CACHE_ENABLED === 'true';
+  const token = await getInstallationToken(
+    installation.installationId,
+    c.env,
+    cacheEnabled ? { packages: 'write' } : undefined,
+  );
   return c.json({ token: token.token, expiresAt: token.expiresAt });
 });
 
