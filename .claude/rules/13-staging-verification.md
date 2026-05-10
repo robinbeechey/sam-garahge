@@ -30,11 +30,9 @@ Local tests run against Miniflare mocks. CI runs unit tests in isolation. Neithe
 
 ## Step-by-Step Procedure
 
-### External Checks That Can Be Ignored
+### All CI Checks Must Pass
 
-- **SonarCloud Code Analysis** — external third-party service; not a SAM-owned check. Failures here do NOT block merge.
-
-All other checks (CI, Deploy Staging, VM Agent Smoke, Preflight Evidence, etc.) are SAM-owned and MUST pass.
+All checks — including **SonarCloud Code Analysis** — MUST pass before merge. SonarCloud provides valuable feedback on code quality, duplication, and potential bugs. Treat its findings the same as any other CI failure: investigate, fix, and only merge when green.
 
 ### 1. Staging Deployment Must Be Green
 
