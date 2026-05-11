@@ -51,6 +51,17 @@ Automated deployment configuration lives in a **GitHub Environment** named `prod
 | `REQUIRE_APPROVAL`   | Require admin approval for new users. First user becomes superadmin.                                                 | _(unset — all users active)_ |
 | `HETZNER_BASE_IMAGE` | Hetzner VM base image. Set to `ubuntu-24.04` for emergency rollback from the faster `docker-ce` marketplace default. | `docker-ce`                  |
 
+**Optional devcontainer cache variables** (Worker `vars`):
+
+SAM can cache built devcontainer images in Cloudflare's managed Containers Registry. The API mints short-lived registry credentials and passes them to VM agents; Wrangler is not installed on VM nodes for this path. If the Cloudflare registry account/token configuration is absent, workspaces fall back to the existing no-cache/GHCR-compatible behavior.
+
+| Variable                                             | Description                                                            | Default                  |
+| ---------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------ |
+| `DEVCONTAINER_CACHE_ENABLED`                         | Enables opportunistic devcontainer image caching                       | `true` in hosted config  |
+| `DEVCONTAINER_CACHE_REGISTRY_HOST`                   | Docker registry host                                                   | `registry.cloudflare.com` |
+| `DEVCONTAINER_CACHE_REPOSITORY_PREFIX`               | Optional prefix for generated cache repository names                   | `sam-`                   |
+| `DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES`   | TTL for short-lived registry credentials minted by the API             | `120`                    |
+
 **Optional runtime-config limit variables** (Worker `vars`):
 
 These are runtime Worker variables, not GitHub Environment variables in the current workflow. To change them for automated deployments, edit the top-level `[vars]` in `apps/api/wrangler.toml` before deploying, or extend `.github/workflows/deploy-reusable.yml` and `scripts/deploy/sync-wrangler-config.ts` to pass them through. Cloudflare Wrangler environment `vars` are non-inheritable, so the sync script copies top-level `[vars]` into the generated `[env.production.vars]` / `[env.staging.vars]` sections.
@@ -82,6 +93,8 @@ These are runtime Worker variables, not GitHub Environment variables in the curr
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CF_API_TOKEN`             | Cloudflare API token with D1, KV, R2, DNS, Workers Scripts, Workers Observability, AI Gateway, Workers Routes, Pages, and SSL/Certificates permissions                                                                        |
 | `CF_ACCOUNT_ID`            | Your Cloudflare account ID (32-char hex). Also used as a Worker secret for the admin observability log viewer.                                                                                                                |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN` | Optional narrower Cloudflare API token for minting managed Containers Registry credentials. Falls back to `CF_API_TOKEN` when unset.                                                                             |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account ID for the managed Containers Registry cache. Falls back to `CF_ACCOUNT_ID` when unset.                                                                                              |
 | `CF_ZONE_ID`               | Your domain's zone ID (32-char hex)                                                                                                                                                                                           |
 | `R2_ACCESS_KEY_ID`         | R2 API token access key                                                                                                                                                                                                       |
 | `R2_SECRET_ACCESS_KEY`     | R2 API token secret key                                                                                                                                                                                                       |
@@ -697,6 +710,9 @@ cd apps/api
 wrangler secret put CF_API_TOKEN
 wrangler secret put CF_ACCOUNT_ID
 wrangler secret put CF_ZONE_ID
+# Optional: use narrower credentials for Cloudflare managed devcontainer cache.
+wrangler secret put DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN
+wrangler secret put DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID
 wrangler secret put GITHUB_CLIENT_ID
 wrangler secret put GITHUB_CLIENT_SECRET
 wrangler secret put GITHUB_APP_ID

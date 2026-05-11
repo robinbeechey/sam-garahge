@@ -136,8 +136,26 @@ export async function handleWorkspaceCreation(
     // Create workspace on VM agent
     const { signCallbackToken } = await import('../../services/jwt');
     const { createWorkspaceOnNode } = await import('../../services/node-agent');
+    const { getDevcontainerCacheCredentials } = await import('../../services/devcontainer-cache');
 
     const callbackToken = await signCallbackToken(workspaceId, rc.env);
+    let devcontainerCache = null;
+    if (state.config.workspaceProfile !== 'lightweight') {
+      try {
+        devcontainerCache = await getDevcontainerCacheCredentials(
+          rc.env,
+          state.config.repository,
+          state.config.devcontainerConfigName
+        );
+      } catch (err) {
+        log.warn('task_runner_do.devcontainer_cache_credentials_failed', {
+          taskId: state.taskId,
+          workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     await createWorkspaceOnNode(state.stepResults.nodeId, rc.env, state.userId, {
       workspaceId,
       repository: state.config.repository,
@@ -148,6 +166,7 @@ export async function handleWorkspaceCreation(
       githubId: state.config.githubId,
       lightweight: state.config.workspaceProfile === 'lightweight',
       devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
+      devcontainerCache,
     });
 
     await rc.ctx.storage.put('state', state);

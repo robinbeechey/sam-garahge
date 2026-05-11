@@ -159,8 +159,8 @@ Implementation direction:
 1. Generate short-lived Cloudflare registry credentials in the API/control
    plane.
 2. Pass `DEVCONTAINER_CACHE_REGISTRY=registry.cloudflare.com`,
-   `DEVCONTAINER_CACHE_USERNAME`, and `DEVCONTAINER_CACHE_TOKEN` to the VM agent
-   bootstrap environment.
+   `DEVCONTAINER_CACHE_USERNAME`, `DEVCONTAINER_CACHE_PASSWORD`, and
+   `DEVCONTAINER_CACHE_REF` to the VM agent bootstrap environment.
 3. Change cache refs from `ghcr.io/<owner>/<repo>:devcontainer-cache` to
    `registry.cloudflare.com/<account-id>/<owner>-<repo>:devcontainer-cache`.
 4. Keep the existing VM agent `docker pull`, `cacheFrom`, `docker tag`, and

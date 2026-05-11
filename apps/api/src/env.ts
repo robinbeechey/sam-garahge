@@ -365,7 +365,12 @@ export interface Env {
   VM_AGENT_PROTOCOL?: string;  // "https" (default) or "http"
   VM_AGENT_PORT?: string;      // "8443" (default) or custom port
   // Devcontainer image caching
-  DEVCONTAINER_CACHE_ENABLED?: string;  // "true" to enable GHCR caching (default: disabled)
+  DEVCONTAINER_CACHE_ENABLED?: string;  // "true" to enable managed registry caching (default: disabled)
+  DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID?: string;  // Cloudflare account for managed registry credentials
+  DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN?: string;   // Token allowed to mint managed registry credentials
+  DEVCONTAINER_CACHE_REGISTRY_HOST?: string;          // Registry host (default: registry.cloudflare.com)
+  DEVCONTAINER_CACHE_REPOSITORY_PREFIX?: string;      // Optional cache repository name prefix
+  DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES?: string; // Temporary registry credential TTL
   // Workspace tool proxy configuration (unified from workspace-mcp)
   WORKSPACE_TOOL_TIMEOUT_MS?: string;             // Timeout for VM agent proxy calls (default: 15000)
   WORKSPACE_TOOL_GITHUB_TIMEOUT_MS?: string;      // Timeout for GitHub API calls (default: 10000)

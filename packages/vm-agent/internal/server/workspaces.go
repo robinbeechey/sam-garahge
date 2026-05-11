@@ -362,6 +362,12 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		GitHubID               string `json:"githubId,omitempty"`
 		Lightweight            bool   `json:"lightweight,omitempty"`
 		DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
+		DevcontainerCache      struct {
+			Registry string `json:"registry,omitempty"`
+			Username string `json:"username,omitempty"`
+			Password string `json:"password,omitempty"`
+			Ref      string `json:"ref,omitempty"`
+		} `json:"devcontainerCache,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -397,6 +403,12 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		GitHubID:               strings.TrimSpace(body.GitHubID),
 		Lightweight:            body.Lightweight,
 		DevcontainerConfigName: strings.TrimSpace(body.DevcontainerConfigName),
+		DevcontainerCache: DevcontainerCacheCredentials{
+			Registry: strings.TrimSpace(body.DevcontainerCache.Registry),
+			Username: strings.TrimSpace(body.DevcontainerCache.Username),
+			Password: strings.TrimSpace(body.DevcontainerCache.Password),
+			Ref:      strings.TrimSpace(body.DevcontainerCache.Ref),
+		},
 	})
 
 	// Note: Per-workspace message reporter is created lazily in
