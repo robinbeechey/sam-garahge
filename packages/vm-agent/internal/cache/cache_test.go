@@ -48,34 +48,34 @@ func TestParseGitHubRepo(t *testing.T) {
 			wantOK:    true,
 		},
 		{
-			name:   "non-GitHub HTTPS URL",
+			name:    "non-GitHub HTTPS URL",
 			repoURL: "https://gitlab.com/octocat/hello-world.git",
-			wantOK: false,
+			wantOK:  false,
 		},
 		{
-			name:   "empty string",
+			name:    "empty string",
 			repoURL: "",
-			wantOK: false,
+			wantOK:  false,
 		},
 		{
-			name:   "whitespace only",
+			name:    "whitespace only",
 			repoURL: "   ",
-			wantOK: false,
+			wantOK:  false,
 		},
 		{
-			name:   "single segment",
+			name:    "single segment",
 			repoURL: "hello-world",
-			wantOK: false,
+			wantOK:  false,
 		},
 		{
-			name:   "empty owner",
+			name:    "empty owner",
 			repoURL: "/hello-world",
-			wantOK: false,
+			wantOK:  false,
 		},
 		{
-			name:   "empty repo",
+			name:    "empty repo",
 			repoURL: "octocat/",
-			wantOK: false,
+			wantOK:  false,
 		},
 		{
 			name:      "https URL with trailing slash",
@@ -185,5 +185,17 @@ func TestCacheRef(t *testing.T) {
 					tt.registry, tt.owner, tt.repo, tt.configName, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRedactSensitive(t *testing.T) {
+	got := redactSensitive("login failed for secret-token", "secret-token")
+	if got != "login failed for [redacted]" {
+		t.Fatalf("redactSensitive() = %q", got)
+	}
+
+	got = redactSensitive("nothing to redact", "")
+	if got != "nothing to redact" {
+		t.Fatalf("redactSensitive() with empty value = %q", got)
 	}
 }

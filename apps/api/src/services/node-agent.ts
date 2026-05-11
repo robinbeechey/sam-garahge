@@ -194,6 +194,13 @@ export async function createWorkspaceOnNode(
     lightweight?: boolean;
     /** Devcontainer config name (subdirectory under .devcontainer/). Undefined = auto-discover. */
     devcontainerConfigName?: string;
+    /** Optional explicit devcontainer cache credentials minted by the control plane. */
+    devcontainerCache?: {
+      registry: string;
+      username: string;
+      password: string;
+      ref: string;
+    } | null;
   }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {

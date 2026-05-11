@@ -132,6 +132,7 @@ type WorkspaceRuntime struct {
 	GitHubID               string
 	Lightweight            bool   // Skip devcontainer build, use fallback image for faster startup
 	DevcontainerConfigName string // Named devcontainer config (subdirectory under .devcontainer/)
+	DevcontainerCache      DevcontainerCacheCredentials
 	PTY                    *pty.Manager
 
 	// ReadyCallbackPending is true when the workspace provisioned successfully but
@@ -142,6 +143,13 @@ type WorkspaceRuntime struct {
 	// ReadyCallbackStatus is the status to report when retrying the callback
 	// ("running" or "recovery").
 	ReadyCallbackStatus string
+}
+
+type DevcontainerCacheCredentials struct {
+	Registry string
+	Username string
+	Password string
+	Ref      string
 }
 
 type EventRecord struct {

@@ -97,9 +97,21 @@ func DockerLogin(ctx context.Context, registry, username, token string) error {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("docker login failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("docker login failed: %w: %s", err, redactSensitive(strings.TrimSpace(string(output)), token))
 	}
 	return nil
+}
+
+func redactSensitive(message string, values ...string) string {
+	redacted := message
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		redacted = strings.ReplaceAll(redacted, value, "[redacted]")
+	}
+	return redacted
 }
 
 // PullCacheImage pulls a cache image from the registry.

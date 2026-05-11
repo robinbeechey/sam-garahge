@@ -30,6 +30,9 @@ R2_BUCKET_NAME = "workspaces-dev-assets"
 VM_AGENT_PROTOCOL = "https"
 VM_AGENT_PORT = "8443"
 DEVCONTAINER_CACHE_ENABLED = "true"
+DEVCONTAINER_CACHE_REGISTRY_HOST = "registry.cloudflare.com"
+DEVCONTAINER_CACHE_REPOSITORY_PREFIX = "sam-"
+DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES = "120"
 # Hetzner VM base image. `docker-ce` marketplace image skips Docker install
 # (saves ~30-60s on cold provisioning). Set to `ubuntu-24.04` for emergency
 # rollback without a code change (also set via GH repo variable HETZNER_BASE_IMAGE).

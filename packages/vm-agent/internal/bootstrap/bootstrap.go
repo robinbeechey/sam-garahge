@@ -338,21 +338,17 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		}()
 	}
 
-	// Resolve devcontainer cache ref (best-effort, only for non-lightweight GitHub repos).
+	// Resolve devcontainer cache ref (best-effort, only for non-lightweight workspaces).
 	cacheRef := ""
-	if cfg.DevcontainerCacheEnabled && !state.Lightweight && bootstrap.GitHubToken != "" {
-		owner, repo, ok := cache.ParseGitHubRepo(cfg.Repository)
-		if ok {
-			cacheRef = cache.CacheRef(cfg.DevcontainerCacheRegistry, owner, repo, state.DevcontainerConfigName)
-			// Best-effort login to the cache registry.
-			if loginErr := cache.DockerLogin(ctx, cfg.DevcontainerCacheRegistry, "x-access-token", bootstrap.GitHubToken); loginErr != nil {
-				slog.Warn("Cache registry login failed (caching disabled for this build)", "registry", cfg.DevcontainerCacheRegistry, "error", loginErr)
-				cacheRef = "" // Disable caching if login fails.
-			} else {
-				reporter.Log("devcontainer_cache", "started", "Checking devcontainer cache")
-			}
-		} else {
-			slog.Info("Devcontainer caching disabled: not a GitHub repository", "repository", cfg.Repository)
+	if cfg.DevcontainerCacheEnabled && !state.Lightweight {
+		var cacheErr error
+		cacheRef, cacheErr = prepareDevcontainerCache(ctx, cfg, bootstrap.GitHubToken, state.DevcontainerConfigName)
+		if cacheErr != nil {
+			slog.Warn("Cache registry login failed (caching disabled for this build)", "registry", cfg.DevcontainerCacheRegistry, "error", cacheErr)
+			cacheRef = ""
+		}
+		if cacheRef != "" {
+			reporter.Log("devcontainer_cache", "started", "Checking devcontainer cache")
 		}
 	}
 
@@ -454,6 +450,34 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	reporter.Log("workspace_ready", "completed", "Workspace is ready")
 
 	return recoveryMode, nil
+}
+
+func prepareDevcontainerCache(ctx context.Context, cfg *config.Config, githubToken, devcontainerConfigName string) (string, error) {
+	if cfg.DevcontainerCacheRef != "" {
+		if cfg.DevcontainerCachePassword == "" {
+			return "", fmt.Errorf("cache password is required when DEVCONTAINER_CACHE_REF is set")
+		}
+		if err := cache.DockerLogin(ctx, cfg.DevcontainerCacheRegistry, cfg.DevcontainerCacheUsername, cfg.DevcontainerCachePassword); err != nil {
+			return "", err
+		}
+		return cfg.DevcontainerCacheRef, nil
+	}
+
+	githubToken = strings.TrimSpace(githubToken)
+	if githubToken == "" {
+		return "", nil
+	}
+	owner, repo, ok := cache.ParseGitHubRepo(cfg.Repository)
+	if !ok {
+		slog.Info("Devcontainer caching disabled: not a GitHub repository", "repository", cfg.Repository)
+		return "", nil
+	}
+
+	cacheRef := cache.CacheRef(cfg.DevcontainerCacheRegistry, owner, repo, devcontainerConfigName)
+	if err := cache.DockerLogin(ctx, cfg.DevcontainerCacheRegistry, "x-access-token", githubToken); err != nil {
+		return "", err
+	}
+	return cacheRef, nil
 }
 
 // ensureVolumeReady creates a Docker named volume for the workspace if it doesn't
