@@ -73,7 +73,7 @@ function parseGitHubRepo(repository: string): { owner: string; repo: string } | 
     return null;
   }
   if (value.startsWith('git@github.com:')) {
-    return splitOwnerRepo(value.slice('git@github.com:'.length).replace(/\.git$/, ''));
+    return splitOwnerRepo(stripGitSuffix(value.slice('git@github.com:'.length)));
   }
   if (value.includes('://')) {
     let url: URL;
@@ -85,7 +85,7 @@ function parseGitHubRepo(repository: string): { owner: string; repo: string } | 
     if (url.hostname !== 'github.com') {
       return null;
     }
-    return splitOwnerRepo(decodeURIComponent(url.pathname).replace(/^\/+|\/+$/g, '').replace(/\.git$/, ''));
+    return splitOwnerRepo(stripGitSuffix(trimSlashes(decodeURIComponent(url.pathname))));
   }
   return splitOwnerRepo(value);
 }
@@ -99,11 +99,73 @@ function splitOwnerRepo(path: string): { owner: string; repo: string } | null {
 }
 
 function sanitizeRepositoryComponent(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return trimHyphens(replaceInvalidRepositoryChars(value.toLowerCase()));
 }
 
 function sanitizeRepositoryPrefix(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+/g, '');
+  return trimLeadingHyphens(replaceInvalidRepositoryChars(value.toLowerCase()));
+}
+
+function stripGitSuffix(value: string): string {
+  return value.endsWith('.git') ? value.slice(0, -4) : value;
+}
+
+function trimSlashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 47) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return value.slice(start, end);
+}
+
+function trimHyphens(value: string): string {
+  return trimTrailingHyphens(trimLeadingHyphens(value));
+}
+
+function trimLeadingHyphens(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) === 45) {
+    start += 1;
+  }
+  return value.slice(start);
+}
+
+function trimTrailingHyphens(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 45) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+function replaceInvalidRepositoryChars(value: string): string {
+  let result = '';
+  let lastWasHyphen = false;
+  for (const char of value) {
+    if (isRepositoryChar(char)) {
+      result += char;
+      lastWasHyphen = false;
+    } else if (!lastWasHyphen) {
+      result += '-';
+      lastWasHyphen = true;
+    }
+  }
+  return result;
+}
+
+function isRepositoryChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return (
+    (code >= 97 && code <= 122) ||
+    (code >= 48 && code <= 57) ||
+    code === 46 ||
+    code === 95 ||
+    code === 45
+  );
 }
 
 function cacheTag(devcontainerConfigName?: string | null): string {
