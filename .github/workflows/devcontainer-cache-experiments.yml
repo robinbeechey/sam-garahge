@@ -258,7 +258,17 @@ jobs:
             --push \
             --pull \
             --expiration-minutes 120 \
-            --json > registry-credentials.json
+            --json > registry-credentials.raw
+          node -e "
+            const fs = require('fs');
+            const raw = fs.readFileSync('registry-credentials.raw', 'utf8');
+            const start = raw.lastIndexOf('{');
+            if (start < 0) {
+              console.error(raw);
+              throw new Error('No JSON object found in Wrangler credentials output');
+            }
+            fs.writeFileSync('registry-credentials.json', raw.slice(start));
+          "
           REGISTRY_HOST="$(jq -r '.registry_host' registry-credentials.json)"
           REGISTRY_USERNAME="$(jq -r '.username' registry-credentials.json)"
           REGISTRY_PASSWORD="$(jq -r '.password' registry-credentials.json)"
