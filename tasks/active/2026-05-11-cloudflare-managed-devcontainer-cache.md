@@ -23,7 +23,8 @@ The GHCR devcontainer cache path cannot push cache images with GitHub App instal
 - [x] Add focused API tests for config absence, request construction, ref construction, and response validation.
 - [x] Add focused Go tests for config parsing/cache ref precedence and no-password logging behavior.
 - [x] Update env docs, self-hosting docs, and deployment secret mapping.
-- [ ] Run targeted tests, then broader validation as practical.
+- [x] Run targeted tests, then broader validation as practical.
+- [x] Update PR #963 with agent preflight and specialist review evidence.
 
 ## Acceptance Criteria
 
@@ -34,3 +35,22 @@ The GHCR devcontainer cache path cannot push cache images with GitHub App instal
 - Secrets are not logged or persisted in workspace metadata.
 - Tests cover the new API and VM-agent behavior.
 - Changes are pushed to PR #963 and the PR is not merged.
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/shared build`
+- `pnpm --filter @simple-agent-manager/providers build`
+- `pnpm --filter @simple-agent-manager/cloud-init build`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/devcontainer-cache.test.ts`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm --filter @simple-agent-manager/api build`
+- `pnpm --filter @simple-agent-manager/api lint` (passed with existing warnings, 0 errors)
+- `pnpm --filter @simple-agent-manager/api exec eslint src/services/devcontainer-cache.ts tests/unit/services/devcontainer-cache.test.ts src/durable-objects/task-runner/workspace-steps.ts src/services/node-agent.ts`
+- `go test ./internal/config ./internal/cache ./internal/server`
+- `go test ./...`
+- `git diff --check`
+
+## PR Evidence
+
+- PR #963 body updated with agent preflight evidence, cross-component data flow, validation, staging caveat, and specialist review evidence.
+- Implementation pushed in commit `0af2c518` and follow-up evidence commit.
