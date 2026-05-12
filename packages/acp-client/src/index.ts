@@ -41,6 +41,8 @@ export { StickyPlanButton } from './components/StickyPlanButton';
 export { TerminalBlock } from './components/TerminalBlock';
 export { ThinkingBlock } from './components/ThinkingBlock';
 export { ToolCallCard } from './components/ToolCallCard';
+export type { TypewriterTextProps } from './components/TypewriterText';
+export { TypewriterText } from './components/TypewriterText';
 export { UsageIndicator } from './components/UsageIndicator';
 export type { VoiceButtonProps } from './components/VoiceButton';
 export { VoiceButton } from './components/VoiceButton';
