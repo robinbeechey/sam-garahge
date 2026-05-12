@@ -13,7 +13,7 @@ import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api';
-import { getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
+import { cancelAgentPrompt, getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
@@ -75,6 +75,7 @@ export interface UseSessionLifecycleResult {
   handleOpenGitChanges: () => void;
 
   // Actions
+  handleCancelPrompt: () => void;
   handleSendFollowUp: () => Promise<void>;
   handleUploadFiles: (files: FileList | File[]) => Promise<void>;
   loadMore: () => Promise<void>;
@@ -380,6 +381,23 @@ export function useSessionLifecycle(
     }
   }, [projectId, sessionId]);
 
+  // Cancel the current in-flight prompt via REST API
+  const cancellingRef = useRef(false);
+  const handleCancelPrompt = useCallback(() => {
+    if (agentActivity === 'idle' || cancellingRef.current) return;
+    cancellingRef.current = true;
+    cancelAgentPrompt(projectId, sessionId)
+      .then(() => {
+        setAgentActivity('idle');
+      })
+      .catch(() => {
+        // Network/server error — keep spinner visible so user can retry
+      })
+      .finally(() => {
+        cancellingRef.current = false;
+      });
+  }, [agentActivity, projectId, sessionId]);
+
   // Load more (pagination)
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
@@ -434,6 +452,7 @@ export function useSessionLifecycle(
     handleFileClick,
     handleOpenFileBrowser,
     handleOpenGitChanges,
+    handleCancelPrompt,
     handleSendFollowUp,
     handleUploadFiles,
     loadMore,

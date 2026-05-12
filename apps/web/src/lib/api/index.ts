@@ -211,6 +211,7 @@ export type {
   SessionSummaryResponse,
 } from './sessions';
 export {
+  cancelAgentPrompt,
   createChatSession,
   getChatSession,
   listActivityEvents,
