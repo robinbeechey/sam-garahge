@@ -12,7 +12,7 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
-import { AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
+import { AcpSessionActivityReportSchema, AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
 
 /** Default max ACP prompt size (256 KB). Override via MAX_ACP_PROMPT_BYTES env var. */
@@ -21,6 +21,36 @@ const DEFAULT_MAX_ACP_PROMPT_BYTES = 262144;
 const DEFAULT_MAX_ACP_CONTEXT_BYTES = 262144;
 
 const acpSessionRoutes = new Hono<{ Bindings: Env }>();
+
+/**
+ * Verify the caller's nodeId matches the session's assigned node.
+ * Throws 404 if session not found, 403 if nodeId mismatches.
+ */
+async function verifySessionNode(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  nodeId: string,
+  userId: string,
+  logTag: string,
+) {
+  const existing = await projectDataService.getAcpSession(env, projectId, sessionId);
+  if (!existing) {
+    throw errors.notFound('ACP session not found');
+  }
+  if (existing.nodeId !== nodeId) {
+    log.error(`acp_session.${logTag}_node_mismatch`, {
+      sessionId,
+      projectId,
+      callerUserId: userId,
+      expectedNodeId: existing.nodeId,
+      receivedNodeId: nodeId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Node identity verification failed');
+  }
+  return existing;
+}
 
 /** POST /:id/acp-sessions — Create a new ACP session */
 acpSessionRoutes.post('/:id/acp-sessions', jsonValidator(CreateAcpSessionSchema), async (c) => {
@@ -155,21 +185,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', jsonValidator(AcpSe
   }
 
   // Validate node matches assigned node
-  const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
-  if (!existing) {
-    throw errors.notFound('ACP session not found');
-  }
-  if (existing.nodeId !== body.nodeId) {
-    log.error('acp_session.status_node_mismatch', {
-      sessionId,
-      projectId,
-      callerUserId: userId,
-      expectedNodeId: existing.nodeId,
-      receivedNodeId: body.nodeId,
-      action: 'rejected',
-    });
-    throw errors.forbidden('Node identity verification failed');
-  }
+  await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'status');
 
   const session = await projectDataService.transitionAcpSession(
     c.env,
@@ -201,23 +217,29 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/heartbeat', jsonValidator(Ac
 
   // Validate node matches assigned node — prevents cross-user session manipulation.
   // See AUTH-VULN-05 in Shannon security assessment.
-  const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
-  if (!existing) {
-    throw errors.notFound('ACP session');
-  }
-  if (existing.nodeId !== body.nodeId) {
-    log.error('acp_session.heartbeat_node_mismatch', {
-      sessionId,
-      projectId,
-      callerUserId: userId,
-      expectedNodeId: existing.nodeId,
-      receivedNodeId: body.nodeId,
-      action: 'rejected',
-    });
-    throw errors.forbidden('Node identity verification failed');
-  }
+  await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'heartbeat');
 
   await projectDataService.updateAcpSessionHeartbeat(c.env, projectId, sessionId, body.nodeId);
+  return c.body(null, 204);
+});
+
+/**
+ * POST /:id/acp-sessions/:sessionId/activity — VM agent reports prompt activity.
+ *
+ * Ephemeral signal (no persistence). Broadcasts to DO WebSocket clients.
+ * Auth: BetterAuth session cookie + nodeId verification (same model as /status).
+ */
+acpSessionRoutes.post('/:id/acp-sessions/:sessionId/activity', jsonValidator(AcpSessionActivityReportSchema), async (c) => {
+  const userId = getUserId(c); // Ensure authenticated
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+
+  const body = c.req.valid('json');
+
+  // Validate node matches assigned node
+  await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'activity');
+
+  await projectDataService.reportAcpSessionActivity(c.env, projectId, sessionId, body.activity);
   return c.body(null, 204);
 });
 

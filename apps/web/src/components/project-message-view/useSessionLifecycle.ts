@@ -145,8 +145,11 @@ export function useSessionLifecycle(
     onMessage: useCallback((msg: ChatMessageResponse) => {
       setMessages((prev) => mergeMessages(prev, [msg], 'append'));
 
-      // Derive agent activity from assistant messages
-      if (msg.role === 'assistant') {
+      // Derive agent activity from any non-user message (assistant, tool, thinking, plan).
+      // Reset the idle fallback timer on every message role — tool calls and
+      // thinking chunks also indicate the agent is active. The 30s timeout is a
+      // safety net; the primary signal is the server-pushed session.activity event.
+      if (msg.role !== 'user') {
         setAgentActivity('responding');
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = setTimeout(() => {
@@ -165,6 +168,18 @@ export function useSessionLifecycle(
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
       setAgentActivity('idle');
+    }, []),
+    onAgentActivity: useCallback((activity: 'prompting' | 'idle') => {
+      setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
+      clearTimeout(idleTimerRef.current);
+      if (activity === 'prompting') {
+        // Safety backstop: if the server never sends "idle" (e.g., crashed or
+        // network partition), fall back to idle after the same timeout used by
+        // the message-based heuristic.
+        idleTimerRef.current = setTimeout(() => {
+          setAgentActivity('idle');
+        }, IDLE_TIMEOUT_MS);
+      }
     }, []),
   });
 
