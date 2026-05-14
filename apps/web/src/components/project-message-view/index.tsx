@@ -223,7 +223,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                   item={item}
                   onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
                   onLoadToolContent={handleLoadToolContent}
-                  animateText={item.kind === 'agent_message' && index === lastAssistantIdx && lc.agentActivity === 'responding'}
+                  animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === lastAssistantIdx && lc.agentActivity === 'responding'}
                   animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
                 />
               </div>
