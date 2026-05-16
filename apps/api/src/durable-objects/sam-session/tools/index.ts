@@ -6,6 +6,7 @@ import { createIdea, createIdeaDef } from './create-idea';
 import { createMission, createMissionDef } from './create-mission';
 import { dispatchTask, dispatchTaskDef } from './dispatch-task';
 import { findRelatedIdeas, findRelatedIdeasDef } from './find-related-ideas';
+import { getAccountSetupStatus, getAccountSetupStatusDef } from './get-account-setup-status';
 import { getCiStatus, getCiStatusDef } from './get-ci-status';
 import { getFileContent, getFileContentDef } from './get-file-content';
 import { getMission, getMissionDef } from './get-mission';
@@ -62,6 +63,8 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   // Codebase contextual search
   searchCodeDef,
   getFileContentDef,
+  // Onboarding
+  getAccountSetupStatusDef,
 ];
 
 type ToolHandler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
@@ -98,6 +101,8 @@ const toolHandlers: Record<string, ToolHandler> = {
   // Codebase contextual search
   search_code: searchCode as ToolHandler,
   get_file_content: getFileContent as ToolHandler,
+  // Onboarding
+  get_account_setup_status: getAccountSetupStatus,
 };
 
 /** Execute a tool call and return the result (or error message on failure). */
