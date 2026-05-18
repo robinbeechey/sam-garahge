@@ -25,6 +25,7 @@ const compactPaddingStyle: CSSProperties = {
 };
 
 export function PageLayout({
+  title,
   children,
   maxWidth = 'lg',
   compact = false,
@@ -37,6 +38,7 @@ export function PageLayout({
         className={`${mwClass} mx-auto ${compact ? 'flex flex-col flex-1 min-h-0' : ''}`}
         style={compact ? compactPaddingStyle : mainPaddingStyle}
       >
+        {title && <h1 className="sr-only">{title}</h1>}
         {children}
       </main>
     </div>

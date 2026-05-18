@@ -5,7 +5,6 @@ EmptyState,
   PageLayout, Select, Spinner, Tabs, Tooltip, } from '@simple-agent-manager/ui';
 import { Copy,Edit, Inbox, Settings, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
 
 import { getActiveUiStandard, type UIStandard,upsertUiStandard } from '../lib/ui-governance';
 
@@ -209,7 +208,6 @@ function EmptyStateShowcase() {
 /* -- Main page component -- */
 
 export function UiStandards() {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
