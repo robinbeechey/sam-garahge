@@ -36,6 +36,11 @@ import {
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkTokenBudget } from '../services/ai-token-budget';
+import {
+  attachUpstreamTokenUsageAccounting,
+  estimateInputTokensFromMessages,
+  optionalExecutionContext,
+} from '../services/ai-token-usage-accounting';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 
@@ -228,8 +233,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     if (contentType) responseHeaders.set('Content-Type', contentType);
     if (isStreaming) responseHeaders.set('Cache-Control', 'no-cache');
 
-    return new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
+    return attachUpstreamTokenUsageAccounting(upstreamResponse, {
+      env: c.env,
+      userId,
+      format: 'anthropic',
+      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
   } catch (err) {
@@ -459,8 +468,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       responseHeaders.set('X-Accel-Buffering', 'no');
     }
 
-    return new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
+    return attachUpstreamTokenUsageAccounting(upstreamResponse, {
+      env: c.env,
+      userId,
+      format: 'openai',
+      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
   } catch (err) {
