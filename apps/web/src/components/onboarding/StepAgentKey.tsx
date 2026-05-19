@@ -1,7 +1,7 @@
 import type { AgentType, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
 import { Alert,Button, Input } from '@simple-agent-manager/ui';
-import { useState } from 'react';
+import { useRef,useState } from 'react';
 
 import { saveAgentCredential, validateAgentCredential } from '../../lib/api';
 
@@ -19,6 +19,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
   const [validatedKey, setValidatedKey] = useState<string | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const latestCredentialKey = useRef<string | null>(null);
 
   if (isComplete) {
     return (
@@ -45,6 +46,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
   };
 
   const credentialKey = JSON.stringify(getCredentialRequest());
+  latestCredentialKey.current = credentialKey;
   const isValidated = validatedKey === credentialKey;
 
   const handleValidate = async () => {
@@ -56,11 +58,14 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
     setValidating(true);
     setValidationMessage(null);
     setError(null);
+    const requestKey = credentialKey;
     try {
       const result = await validateAgentCredential(data);
-      setValidatedKey(credentialKey);
+      if (latestCredentialKey.current !== requestKey) return;
+      setValidatedKey(requestKey);
       setValidationMessage(result.message);
     } catch (err) {
+      if (latestCredentialKey.current !== requestKey) return;
       setValidatedKey(null);
       setError(err instanceof Error ? err.message : 'API key validation failed');
     } finally {
@@ -129,10 +134,11 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
       {/* API key input */}
       {selectedDef && (
         <div className="mb-4">
-          <label className="block text-sm font-medium text-fg-primary mb-1">
+          <label htmlFor="agent-api-key" className="block text-sm font-medium text-fg-primary mb-1">
             {selectedDef.name} API Key
           </label>
           <Input
+            id="agent-api-key"
             type="password"
             autoComplete="off"
             value={apiKey}
@@ -161,15 +167,15 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
       )}
 
       {/* Actions */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={onSkip}
-          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="self-start text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           Skip this step
         </button>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
           <Button
             variant="secondary"
             size="md"

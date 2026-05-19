@@ -118,6 +118,22 @@ const ACTIVE_SESSION = {
   },
 };
 
+const PROVISIONING_SESSION = {
+  ...ACTIVE_SESSION,
+  id: 'session-provisioning-1',
+  workspaceId: null,
+  taskId: 'task-provisioning-1',
+  topic: 'Provisioning session with long branch name',
+  status: 'active',
+  task: {
+    id: 'task-provisioning-1',
+    status: 'queued',
+    taskMode: 'task',
+    outputBranch: 'sam/provisioning-progress-with-long-branch-name',
+    errorMessage: null,
+  },
+};
+
 function makeMessage(index: number) {
   const role = index % 2 === 0 ? 'user' : 'assistant';
   return {
@@ -160,7 +176,7 @@ async function assertMobileTouchTargets(page: Page) {
   }
 }
 
-async function setupApiMocks(page: Page, mode: 'new' | 'active') {
+async function setupApiMocks(page: Page, mode: 'new' | 'active' | 'provisioning') {
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -191,15 +207,30 @@ async function setupApiMocks(page: Page, mode: 'new' | 'active') {
       if (subPath === '/agent-profiles') return respond(200, { items: AGENT_PROFILES });
       if (subPath === '/cached-commands') return respond(200, { commands: CACHED_COMMANDS });
       if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
+      if (subPath === '/tasks/task-provisioning-1') {
+        return respond(200, {
+          id: 'task-provisioning-1',
+          status: 'queued',
+          executionStep: 'workspace_ready',
+          errorMessage: null,
+          outputBranch: 'sam/provisioning-progress-with-long-branch-name',
+          startedAt: new Date(Date.now() - 85_000).toISOString(),
+          workspaceId: 'workspace-provisioning-1',
+        });
+      }
       if (subPath === '/sessions') {
-        const sessions = mode === 'active' ? [ACTIVE_SESSION] : [];
+        const sessions = mode === 'active'
+          ? [ACTIVE_SESSION]
+          : mode === 'provisioning'
+            ? [PROVISIONING_SESSION]
+            : [];
         return respond(200, { sessions, total: sessions.length, hasMore: false });
       }
 
       const sessionDetailMatch = subPath.match(/^\/sessions\/([^/]+)$/);
       if (sessionDetailMatch) {
         return respond(200, {
-          session: ACTIVE_SESSION,
+          session: mode === 'provisioning' ? PROVISIONING_SESSION : ACTIVE_SESSION,
           messages: Array.from({ length: 36 }, (_, index) => makeMessage(index)),
           hasMore: false,
         });
@@ -271,6 +302,18 @@ test.describe('Project chat composer audit', () => {
     await textarea.fill('@Cod');
     await expect(page.getByText('@Codex')).toBeVisible();
     await screenshot(page, `project-chat-composer-followup-mention-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await assertNoOverflow(page);
+  });
+
+  test('restored provisioning session shows staged progress without overflow', async ({ page }, testInfo) => {
+    await setupApiMocks(page, 'provisioning');
+    await page.goto(`/projects/${MOCK_PROJECT.id}/chat/${PROVISIONING_SESSION.id}`);
+    await page.waitForTimeout(1500);
+
+    await expect(page.getByText('Installing dependencies (3/4)')).toBeVisible();
+    await expect(page.getByText(/Usually takes 2-4 minutes/)).toBeVisible();
+    await expect(page.getByText('sam/provisioning-progress-with-long-branch-name')).toBeVisible();
+    await screenshot(page, `project-chat-provisioning-progress-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
     await assertNoOverflow(page);
   });
 });

@@ -106,5 +106,11 @@ test.describe('Onboarding wizard audit', () => {
     await expect(page.getByRole('button', { name: 'Add my own setup' })).toBeVisible();
     await screenshot(page, `onboarding-trial-final-${suffix}`);
     await assertNoOverflow(page);
+
+    await page.getByRole('button', { name: 'Add my own setup' }).click();
+    await expect(page.getByText('Connect your AI agent')).toBeVisible();
+    await expect(page.getByText('AI agent connected')).toHaveCount(0);
+    await screenshot(page, `onboarding-trial-own-setup-${suffix}`);
+    await assertNoOverflow(page);
   });
 });

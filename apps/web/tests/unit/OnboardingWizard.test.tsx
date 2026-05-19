@@ -399,4 +399,22 @@ describe('StepHowItWorks', () => {
 
     expect(localStorage.getItem('sam-onboarding-wizard-dismissed-user_123')).toBe('true');
   });
+
+  it('lets trial-covered users add their own credentials instead of showing completed trial steps', async () => {
+    mocks.getTrialStatus.mockResolvedValue({ available: true });
+    mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
+
+    renderWizard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Using trial compute right now')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add my own setup' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Connect your AI agent')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('AI agent connected')).not.toBeInTheDocument();
+  });
 });

@@ -35,6 +35,7 @@ export function OnboardingWizard() {
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState<boolean | null>(null);
   const [currentStep, setCurrentStep] = useState<WizardStep>('agent');
+  const [ownSetupMode, setOwnSetupMode] = useState(false);
   const [status, setStatus] = useState<SetupStatus>({ hasAgent: false, hasCloud: false, hasGitHub: false, trialAvailable: false });
 
   const userId = user?.id;
@@ -60,17 +61,29 @@ export function OnboardingWizard() {
       const hasGitHub = installations.length > 0;
       const hasAgent = agentCreds.credentials.some((c) => c.isActive);
 
-      // If platform trial is available, treat agent + cloud as satisfied
       const trialAvailable = trialStatus?.available ?? false;
       const effectiveHasAgent = hasAgent || trialAvailable;
       const effectiveHasCloud = hasCloud || trialAvailable;
 
-      setStatus({ hasAgent: effectiveHasAgent, hasCloud: effectiveHasCloud, hasGitHub, trialAvailable });
+      setStatus({ hasAgent, hasCloud, hasGitHub, trialAvailable });
 
       // If a user has completed their own setup, stay out of the way.
       if (hasAgent && hasCloud && hasGitHub) {
         setDismissed(true);
         if (userId) localStorage.setItem(getStorageKey(userId), 'true');
+        return;
+      }
+
+      if (ownSetupMode) {
+        if (!hasAgent) {
+          setCurrentStep('agent');
+        } else if (!hasCloud) {
+          setCurrentStep('cloud');
+        } else if (!hasGitHub) {
+          setCurrentStep('github');
+        } else {
+          setCurrentStep('how-it-works');
+        }
         return;
       }
 
@@ -96,7 +109,7 @@ export function OnboardingWizard() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [ownSetupMode, userId]);
 
   useEffect(() => {
     checkStatus();
@@ -139,6 +152,8 @@ export function OnboardingWizard() {
   if (loading || dismissed === null || dismissed) return null;
 
   const currentIdx = STEPS.findIndex((s) => s.id === currentStep);
+  const effectiveHasAgent = status.hasAgent || (!ownSetupMode && status.trialAvailable);
+  const effectiveHasCloud = status.hasCloud || (!ownSetupMode && status.trialAvailable);
 
   return (
     <div data-testid="onboarding-wizard" aria-label="Account setup">
@@ -149,8 +164,8 @@ export function OnboardingWizard() {
           const isActive = step.id === currentStep;
           const isPast = idx < currentIdx;
           const isStepComplete =
-            (step.id === 'agent' && status.hasAgent) ||
-            (step.id === 'cloud' && status.hasCloud) ||
+            (step.id === 'agent' && effectiveHasAgent) ||
+            (step.id === 'cloud' && effectiveHasCloud) ||
             (step.id === 'github' && status.hasGitHub);
 
           return (
@@ -191,14 +206,14 @@ export function OnboardingWizard() {
       <div className="p-4 pt-2" id={`onboarding-step-${currentStep}`} role="tabpanel">
         {currentStep === 'agent' && (
           <StepAgentKey
-            isComplete={status.hasAgent}
+            isComplete={effectiveHasAgent}
             onComplete={() => handleStepComplete('agent')}
             onSkip={() => handleStepSkip('agent')}
           />
         )}
         {currentStep === 'cloud' && (
           <StepCloudProvider
-            isComplete={status.hasCloud}
+            isComplete={effectiveHasCloud}
             onComplete={() => handleStepComplete('cloud')}
             onSkip={() => handleStepSkip('cloud')}
           />
@@ -215,7 +230,10 @@ export function OnboardingWizard() {
             trialAvailable={status.trialAvailable}
             onComplete={() => handleStepComplete('how-it-works')}
             onCreateProject={() => finishAndNavigate('/projects/new')}
-            onOwnSetup={() => setCurrentStep('agent')}
+            onOwnSetup={() => {
+              setOwnSetupMode(true);
+              setCurrentStep('agent');
+            }}
           />
         )}
       </div>

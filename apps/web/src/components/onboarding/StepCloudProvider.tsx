@@ -1,7 +1,7 @@
 import type { CreateCredentialRequest } from '@simple-agent-manager/shared';
 import { PROVIDER_HELP,PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert,Button, Input } from '@simple-agent-manager/ui';
-import { useState } from 'react';
+import { useRef,useState } from 'react';
 
 import { createCredential, validateCredential } from '../../lib/api';
 
@@ -38,6 +38,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
   const [validatedKey, setValidatedKey] = useState<string | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const latestCredentialKey = useRef<string | null>(null);
 
   if (isComplete) {
     return (
@@ -62,6 +63,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
   };
 
   const credentialKey = JSON.stringify(getCredentialRequest());
+  latestCredentialKey.current = credentialKey;
   const isValidated = validatedKey === credentialKey;
 
   const handleValidate = async () => {
@@ -73,11 +75,14 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
     setValidating(true);
     setValidationMessage(null);
     setError(null);
+    const requestKey = credentialKey;
     try {
       const result = await validateCredential(data);
-      setValidatedKey(credentialKey);
+      if (latestCredentialKey.current !== requestKey) return;
+      setValidatedKey(requestKey);
       setValidationMessage(result.message);
     } catch (err) {
+      if (latestCredentialKey.current !== requestKey) return;
       setValidatedKey(null);
       setError(err instanceof Error ? err.message : 'Credential validation failed');
     } finally {
@@ -194,15 +199,15 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
       )}
 
       {/* Actions */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={onSkip}
-          className="text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="self-start text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           Skip this step
         </button>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
           <Button
             variant="secondary"
             size="md"

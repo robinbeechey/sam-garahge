@@ -1,6 +1,6 @@
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert,Button, Input } from '@simple-agent-manager/ui';
-import { useState } from 'react';
+import { useRef,useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
 import { createCredential, deleteCredential, validateCredential } from '../lib/api';
@@ -22,18 +22,24 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const isValidated = validatedToken === token.trim();
+  const trimmedToken = token.trim();
+  const latestToken = useRef(trimmedToken);
+  latestToken.current = trimmedToken;
+  const isValidated = validatedToken === trimmedToken;
 
   const handleValidate = async () => {
-    if (!token.trim()) return;
+    if (!trimmedToken) return;
     setValidating(true);
     setValidationMessage(null);
     setError(null);
+    const requestToken = trimmedToken;
     try {
-      const result = await validateCredential({ provider: 'hetzner', token: token.trim() });
-      setValidatedToken(token.trim());
+      const result = await validateCredential({ provider: 'hetzner', token: requestToken });
+      if (latestToken.current !== requestToken) return;
+      setValidatedToken(requestToken);
       setValidationMessage(result.message);
     } catch (err) {
+      if (latestToken.current !== requestToken) return;
       setValidatedToken(null);
       setError(err instanceof Error ? err.message : 'Failed to validate token');
     } finally {
@@ -148,7 +154,7 @@ export function HetznerTokenForm({ credential, onUpdate }: HetznerTokenFormProps
       {validationMessage && <Alert variant="success">{validationMessage}</Alert>}
       {error && <Alert variant="error">{error}</Alert>}
 
-      <div className="flex gap-3">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:gap-3">
         <Button type="button" variant="secondary" disabled={validating || loading || !token.trim()} loading={validating} onClick={handleValidate}>
           {isValidated ? 'Tested' : 'Test connection'}
         </Button>
