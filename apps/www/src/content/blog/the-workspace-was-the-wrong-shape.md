@@ -23,7 +23,7 @@ The realization crept in over time: in an ideal world, I would never have to run
 
 ## Chat eats the IDE
 
-So SAM became chat-forward. The project page went from seven tabs (overview, chat, kanban, tasks, sessions, activity, settings) to one. The conversation.
+So SAM became chat-forward. The project page went from a bunch of tabs focused on managing files and environments to tabs focused on guiding agents, with the conversation as the primary surface.
 
 File browsing, git diffs, attachments, agent output... all inside the chat. The workspace still exists underneath: every agent gets a full cloud VM on [Hetzner](https://www.hetzner.com/cloud/) running a [devcontainer](https://containers.dev/). But the workspace is infrastructure now, not interface. You tell the agent what you want, it does the work, you see the results in the conversation.
 
