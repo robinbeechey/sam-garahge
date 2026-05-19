@@ -29,7 +29,7 @@ export { chatMessagesToConversationItems, groupMessages } from './types';
 
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
-  projectId, lc, onSessionMutated, onRetry, onFork, lineageText, onHeightChange,
+  projectId, lc, onSessionMutated, onRetry, onFork, lineageText,
 }: {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
@@ -37,40 +37,10 @@ function FloatingHeader({
   onRetry?: () => void;
   onFork?: () => void;
   lineageText?: string;
-  onHeightChange?: (height: number) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!lc.session) {
-      onHeightChange?.(0);
-      return;
-    }
-
-    const node = containerRef.current;
-    if (!node) return;
-
-    const updateHeight = () => {
-      onHeightChange?.(Math.ceil(node.getBoundingClientRect().height));
-    };
-
-    updateHeight();
-
-    const observer = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(updateHeight)
-      : null;
-    observer?.observe(node);
-    window.addEventListener('resize', updateHeight);
-
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener('resize', updateHeight);
-    };
-  }, [lc.session, onHeightChange]);
-
   if (!lc.session) return null;
   return (
-    <div ref={containerRef} className="absolute top-0 left-0 right-0 z-10">
+    <div className="relative z-10 shrink-0">
       <SessionHeader
         projectId={projectId}
         session={lc.session}
@@ -160,7 +130,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
   // Track IDs of user messages that should animate (freshly submitted optimistic messages)
   const [animatedUserMsgIds] = useState(() => new Set<string>());
-  const [floatingHeaderHeight, setFloatingHeaderHeight] = useState(0);
   const prevMsgCountRef = useRef(0);
 
   /** Lazy-load tool content for a compact-mode tool call card. */
@@ -168,10 +137,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     const { content } = await getMessageToolContent(projectId, sessionId, messageId);
     return (content as Array<{ type: string } & Record<string, unknown>>).map((c) => mapToolCallContent(c));
   }, [projectId, sessionId]);
-
-  const handleFloatingHeaderHeightChange = useCallback((height: number) => {
-    setFloatingHeaderHeight((current) => current === height ? current : height);
-  }, []);
 
   // Convert DO messages to conversation items (single source)
   const conversationItems = useMemo<ConversationItem[]>(() => {
@@ -268,53 +233,55 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
-        <div className="flex-1 min-h-0 relative">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} onHeightChange={handleFloatingHeaderHeightChange} />
-          <div className="flex items-center justify-center h-full" style={{ paddingTop: floatingHeaderHeight || undefined }}>
+        <div className="flex-1 min-h-0 flex flex-col">
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
+          <div className="flex flex-1 items-center justify-center">
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
             </span>
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 min-w-0 relative" role="log" aria-live="polite" aria-label="Conversation">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} onHeightChange={handleFloatingHeaderHeightChange} />
-          <Virtuoso
-            ref={virtuosoRef}
-            style={{ height: '100%' }}
-            data={conversationItems}
-            firstItemIndex={lc.firstItemIndex}
-            initialTopMostItemIndex={conversationItems.length - 1}
-            followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
-            alignToBottom
-            atBottomThreshold={50}
-            atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-            overscan={200}
-            itemContent={(index, item) => (
-              <div className="sam-message-entry px-4 pb-3">
-                <AcpConversationItemView
-                  item={item}
-                  onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
-                  onLoadToolContent={handleLoadToolContent}
-                  animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}
-                  animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
-                />
-              </div>
-            )}
-            components={{
-              Header: () => (
-                <div style={{ paddingTop: lc.session ? floatingHeaderHeight : undefined }}>
-                  {lc.hasMore && (
-                    <div className="text-center py-3">
-                      <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
-                        Load earlier messages
-                      </Button>
-                    </div>
-                  )}
+        <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} lineageText={lineageText} />
+          <div className="flex-1 min-h-0">
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              data={conversationItems}
+              firstItemIndex={lc.firstItemIndex}
+              initialTopMostItemIndex={conversationItems.length - 1}
+              followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
+              alignToBottom
+              atBottomThreshold={50}
+              atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+              overscan={200}
+              itemContent={(index, item) => (
+                <div className="sam-message-entry px-4 pb-3">
+                  <AcpConversationItemView
+                    item={item}
+                    onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
+                    onLoadToolContent={handleLoadToolContent}
+                    animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}
+                    animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+                  />
                 </div>
-              ),
-            }}
-          />
+              )}
+              components={{
+                Header: () => (
+                  <>
+                    {lc.hasMore && (
+                      <div className="text-center py-3">
+                        <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
+                          Load earlier messages
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ),
+              }}
+            />
+          </div>
 
           {/* Scroll to bottom button */}
           {lc.showScrollButton && (
