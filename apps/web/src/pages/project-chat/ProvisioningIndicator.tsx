@@ -1,8 +1,5 @@
 import type { TaskExecutionStep } from '@simple-agent-manager/shared';
-import {
-  EXECUTION_STEP_LABELS,
-  EXECUTION_STEP_ORDER,
-} from '@simple-agent-manager/shared';
+import { EXECUTION_STEP_LABELS, EXECUTION_STEP_ORDER } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { useEffect, useState } from 'react';
 
@@ -25,10 +22,41 @@ function getStageIndex(step: TaskExecutionStep | null): number {
   if (!step) return 0;
   if (step === 'running' || step === 'awaiting_followup') return PROVISIONING_STAGES.length - 1;
   const index = PROVISIONING_STAGES.findIndex((stage) => stage.steps.includes(step));
-  return index >= 0 ? index : 0;
+  return Math.max(index, 0);
 }
 
-export function ProvisioningIndicator({ state, bootLogCount, onViewLogs }: { state: ProvisioningState; bootLogCount: number; onViewLogs: () => void }) {
+function getElapsedDisplay(elapsed: number): string {
+  const seconds = Math.floor(elapsed / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function getStatusLabel(state: ProvisioningState): string {
+  if (state.status === 'failed') return 'Setup failed';
+  if (state.status === 'cancelled') return 'Cancelled';
+  if (!state.executionStep) return 'Starting...';
+
+  const stageIndex = getStageIndex(state.executionStep);
+  const stageLabel =
+    PROVISIONING_STAGES[stageIndex]?.label ?? EXECUTION_STEP_LABELS[state.executionStep];
+  return `${stageLabel} (${stageIndex + 1}/${PROVISIONING_STAGES.length})`;
+}
+
+function getStageColor(isComplete: boolean, isCurrent: boolean, hasStarted: boolean): string {
+  if (isComplete) return 'var(--sam-color-success)';
+  if (isCurrent || hasStarted) return 'var(--sam-color-accent-primary)';
+  return 'var(--sam-color-border-default)';
+}
+
+export function ProvisioningIndicator({
+  state,
+  bootLogCount,
+  onViewLogs,
+}: {
+  state: ProvisioningState;
+  bootLogCount: number;
+  onViewLogs: () => void;
+}) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -37,29 +65,25 @@ export function ProvisioningIndicator({ state, bootLogCount, onViewLogs }: { sta
     return () => clearInterval(interval);
   }, [state.startedAt, state.status]);
 
-  const seconds = Math.floor(elapsed / 1000);
-  const elapsedDisplay = seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
-
-  const statusLabel = state.status === 'failed' ? 'Setup failed'
-    : state.status === 'cancelled' ? 'Cancelled'
-    : state.executionStep ? `${PROVISIONING_STAGES[getStageIndex(state.executionStep)]?.label ?? EXECUTION_STEP_LABELS[state.executionStep]} (${getStageIndex(state.executionStep) + 1}/${PROVISIONING_STAGES.length})`
-    : 'Starting...';
-
   const currentStepOrder = state.executionStep ? EXECUTION_STEP_ORDER[state.executionStep] : -1;
   const currentStageIndex = getStageIndex(state.executionStep);
   const isFailed = state.status === 'failed';
 
   return (
-    <div className={`shrink-0 px-4 py-3 border-b ${isFailed ? 'bg-danger-tint border-[rgba(239,68,68,0.12)]' : 'bg-[rgba(22,163,74,0.06)] border-[rgba(34,197,94,0.1)]'}`}>
+    <div
+      className={`shrink-0 px-4 py-3 border-b ${isFailed ? 'bg-danger-tint border-[rgba(239,68,68,0.12)]' : 'bg-[rgba(22,163,74,0.06)] border-[rgba(34,197,94,0.1)]'}`}
+    >
       <div className="flex items-center gap-2 mb-2">
         {!isTerminal(state.status) && <Spinner size="sm" />}
-        <span className={`sam-type-secondary font-medium ${isFailed ? 'text-danger' : 'text-fg-primary'}`}>
-          {statusLabel}
+        <span
+          className={`sam-type-secondary font-medium ${isFailed ? 'text-danger' : 'text-fg-primary'}`}
+        >
+          {getStatusLabel(state)}
         </span>
         {state.branchName && !isTerminal(state.status) && (
           <span className="sam-type-caption text-fg-muted">{state.branchName}</span>
         )}
-        <span className="sam-type-caption text-fg-muted ml-auto">{elapsedDisplay}</span>
+        <span className="sam-type-caption text-fg-muted ml-auto">{getElapsedDisplay(elapsed)}</span>
         {bootLogCount > 0 && (
           <button
             type="button"
@@ -73,7 +97,10 @@ export function ProvisioningIndicator({ state, bootLogCount, onViewLogs }: { sta
 
       {!isTerminal(state.status) && (
         <div className="sam-type-caption text-fg-muted mb-2">
-          Usually takes 2-4 minutes. Current detail: {state.executionStep ? EXECUTION_STEP_LABELS[state.executionStep] : 'Waiting for task runner...'}
+          Usually takes 2-4 minutes. Current detail:{' '}
+          {state.executionStep
+            ? EXECUTION_STEP_LABELS[state.executionStep]
+            : 'Waiting for task runner...'}
         </div>
       )}
 
@@ -82,21 +109,21 @@ export function ProvisioningIndicator({ state, bootLogCount, onViewLogs }: { sta
           {PROVISIONING_STAGES.map((stage, index) => {
             const isComplete = index < currentStageIndex;
             const isCurrent = index === currentStageIndex;
-            const hasStarted = stage.steps.some((step) => EXECUTION_STEP_ORDER[step] <= currentStepOrder);
+            const hasStarted = stage.steps.some(
+              (step) => EXECUTION_STEP_ORDER[step] <= currentStepOrder
+            );
             return (
               <div key={stage.label} className="min-w-0">
                 <div
                   title={stage.label}
                   className="h-[3px] rounded-sm transition-colors duration-300"
                   style={{
-                    backgroundColor: isComplete
-                      ? 'var(--sam-color-success)'
-                      : isCurrent || hasStarted
-                      ? 'var(--sam-color-accent-primary)'
-                      : 'var(--sam-color-border-default)',
+                    backgroundColor: getStageColor(isComplete, isCurrent, hasStarted),
                   }}
                 />
-                <div className={`mt-1 text-[10px] leading-tight truncate ${isCurrent ? 'text-fg-primary' : 'text-fg-muted'}`}>
+                <div
+                  className={`mt-1 text-[10px] leading-tight truncate ${isCurrent ? 'text-fg-primary' : 'text-fg-muted'}`}
+                >
                   {index + 1}. {stage.label}
                 </div>
               </div>

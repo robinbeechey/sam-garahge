@@ -1,52 +1,30 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-const MOCK_USER = {
-  user: {
-    id: 'user-settings-audit',
-    email: 'settings-audit@example.com',
-    name: 'Settings Audit User',
-    image: null,
-    role: 'user',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-05-19T00:00:00Z',
-    updatedAt: '2026-05-19T00:00:00Z',
-  },
-  session: {
-    id: 'session-settings-audit',
-    userId: 'user-settings-audit',
-    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-05-19T00:00:00Z',
-    updatedAt: '2026-05-19T00:00:00Z',
-  },
-};
+import {
+  assertNoOverflow,
+  getProjectSuffix,
+  jsonResponse,
+  makeMockUser,
+  screenshot,
+} from './audit-helpers';
 
-async function screenshot(page: Page, name: string) {
-  await page.waitForTimeout(600);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-    fullPage: true,
-  });
-}
-
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
-  );
-  expect(overflow).toBe(false);
-}
+const MOCK_USER = makeMockUser({
+  email: 'settings-audit@example.com',
+  name: 'Settings Audit User',
+  sessionId: 'session-settings-audit',
+  userId: 'user-settings-audit',
+});
 
 async function setupApiMocks(page: Page) {
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const respond = (status: number, body: unknown) => jsonResponse(route, status, body);
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path === '/api/auth/smoke-test-status') return respond(200, { enabled: false });
     if (path === '/api/projects') return respond(200, { projects: [], nextCursor: null });
     if (path === '/api/credentials' && method === 'GET') {
@@ -61,7 +39,11 @@ async function setupApiMocks(page: Page) {
       ]);
     }
     if (path === '/api/credentials/validate' && method === 'POST') {
-      return respond(200, { valid: true, provider: 'hetzner', message: 'hetzner credential validated.' });
+      return respond(200, {
+        valid: true,
+        provider: 'hetzner',
+        message: 'hetzner credential validated.',
+      });
     }
     if (path === '/api/credentials' && method === 'POST') {
       return respond(200, { id: 'cred-hetzner', provider: 'hetzner', connected: true });
@@ -77,7 +59,7 @@ test.describe('Settings Hetzner validation audit', () => {
     await page.goto('/settings/cloud-provider');
     await page.waitForTimeout(1000);
 
-    const suffix = testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    const suffix = getProjectSuffix(testInfo.project.name);
     await expect(page.getByText('Hetzner')).toBeVisible();
     await page.getByRole('button', { name: 'Update' }).click();
     await page.getByLabel('Hetzner API Token').fill(`hetzner-${'token-'.repeat(42)}`);

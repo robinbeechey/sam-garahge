@@ -52,6 +52,10 @@ function makeTestEnv(): Env {
   } as Env;
 }
 
+function makeFakeSecret(prefix: string): string {
+  return `${prefix}-${'1234567890abcdef'}`;
+}
+
 describe('Credentials Routes - OAuth Support', () => {
   let app: Hono<{ Bindings: Env }>;
   let mockDB: any;
@@ -85,20 +89,28 @@ describe('Credentials Routes - OAuth Support', () => {
     };
 
     (drizzle as any).mockReturnValue(mockDB);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }))
+    );
   });
 
   describe('POST /api/credentials/agent/validate', () => {
     it('validates a Claude API key against the provider models endpoint without storing it', async () => {
-      const res = await app.request('/api/credentials/agent/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentType: 'claude-code',
-          credentialKind: 'api-key',
-          credential: 'sk-ant-api03-1234567890abcdef',
-        }),
-      }, makeTestEnv());
+      const claudeApiKey = makeFakeSecret('sk-ant-api03');
+      const res = await app.request(
+        '/api/credentials/agent/validate',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentType: 'claude-code',
+            credentialKind: 'api-key',
+            credential: claudeApiKey,
+          }),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -107,23 +119,30 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
         'https://api.anthropic.com/v1/models',
         expect.objectContaining({
-          headers: expect.objectContaining({ 'x-api-key': 'sk-ant-api03-1234567890abcdef' }),
+          headers: expect.objectContaining({ 'x-api-key': claudeApiKey }),
         })
       );
     });
 
     it('returns 400 when provider validation rejects the API key', async () => {
-      vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: 'bad key' }), { status: 401 }));
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'bad key' }), { status: 401 })
+      );
+      const claudeApiKey = makeFakeSecret('sk-ant-api03');
 
-      const res = await app.request('/api/credentials/agent/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentType: 'claude-code',
-          credentialKind: 'api-key',
-          credential: 'sk-ant-api03-1234567890abcdef',
-        }),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent/validate',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentType: 'claude-code',
+            credentialKind: 'api-key',
+            credential: claudeApiKey,
+          }),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -131,15 +150,19 @@ describe('Credentials Routes - OAuth Support', () => {
     });
 
     it('validates OAuth credentials by format only', async () => {
-      const res = await app.request('/api/credentials/agent/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentType: 'claude-code',
-          credentialKind: 'oauth-token',
-          credential: 'sk-ant-oat01-1234567890abcdefghijklmnopqrstuvwxyz',
-        }),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent/validate',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentType: 'claude-code',
+            credentialKind: 'oauth-token',
+            credential: 'sk-ant-oat01-1234567890abcdefghijklmnopqrstuvwxyz',
+          }),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -148,15 +171,19 @@ describe('Credentials Routes - OAuth Support', () => {
     });
 
     it('validates Google API keys without placing the credential in the URL', async () => {
-      const res = await app.request('/api/credentials/agent/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentType: 'google-gemini',
-          credentialKind: 'api-key',
-          credential: 'google-api-key-1234567890',
-        }),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent/validate',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentType: 'google-gemini',
+            credentialKind: 'api-key',
+            credential: 'google-api-key-1234567890',
+          }),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(200);
       expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -165,7 +192,9 @@ describe('Credentials Routes - OAuth Support', () => {
           headers: expect.objectContaining({ 'x-goog-api-key': 'google-api-key-1234567890' }),
         })
       );
-      expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).not.toContain('google-api-key-1234567890');
+      expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).not.toContain(
+        'google-api-key-1234567890'
+      );
     });
   });
 
@@ -180,11 +209,15 @@ describe('Credentials Routes - OAuth Support', () => {
         autoActivate: true,
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -202,11 +235,15 @@ describe('Credentials Routes - OAuth Support', () => {
         autoActivate: true,
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -228,21 +265,30 @@ describe('Credentials Routes - OAuth Support', () => {
       };
 
       const env = makeTestEnv();
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, env);
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        env
+      );
 
       expect(res.status).toBe(201);
 
       // Autoactivate path now uses atomic DATABASE.batch([deactivate, upsert]).
       // Verify a deactivate statement was prepared with project_id IS NULL scope guard
       // (user-scoped deactivate must not affect project-scoped rows).
-      const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn>; batch: ReturnType<typeof vi.fn> };
+      const database = env.DATABASE as unknown as {
+        prepare: ReturnType<typeof vi.fn>;
+        batch: ReturnType<typeof vi.fn>;
+      };
       expect(database.batch).toHaveBeenCalled();
       const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
-      const deactivateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials SET is_active = 0'));
+      const deactivateSql = prepareCalls.find((sql) =>
+        sql.includes('UPDATE credentials SET is_active = 0')
+      );
       expect(deactivateSql).toBeDefined();
       expect(deactivateSql).toContain('project_id IS NULL');
     });
@@ -254,11 +300,15 @@ describe('Credentials Routes - OAuth Support', () => {
         // credentialKind not specified — defaults to 'api-key' in handler
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(201);
     });
@@ -270,11 +320,15 @@ describe('Credentials Routes - OAuth Support', () => {
         credential: 'sk-ant-oat01-1234567890abcdefghijklmnopqrstuvwxyz',
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -288,11 +342,15 @@ describe('Credentials Routes - OAuth Support', () => {
         credential: 'oauth_token_that_is_long_enough_to_pass_validation_1234567890',
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -327,9 +385,13 @@ describe('Credentials Routes - OAuth Support', () => {
 
       mockDB.where.mockResolvedValueOnce(mockCredentials);
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'GET',
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'GET',
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -354,11 +416,15 @@ describe('Credentials Routes - OAuth Support', () => {
         autoActivate: false,
       };
 
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, makeTestEnv());
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        makeTestEnv()
+      );
 
       expect(res.status).toBe(201);
       const body = await res.json();
@@ -370,12 +436,14 @@ describe('Credentials Routes - OAuth Support', () => {
 
     it('should update existing credential of same type and kind', async () => {
       // Mock existing credential of same type
-      mockDB.limit.mockResolvedValueOnce([{
-        id: 'existing-id',
-        agentType: 'claude-code',
-        credentialKind: 'oauth-token',
-        createdAt: '2024-01-01',
-      }]);
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'existing-id',
+          agentType: 'claude-code',
+          credentialKind: 'oauth-token',
+          createdAt: '2024-01-01',
+        },
+      ]);
 
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
@@ -385,18 +453,24 @@ describe('Credentials Routes - OAuth Support', () => {
       };
 
       const env = makeTestEnv();
-      const res = await app.request('/api/credentials/agent', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      }, env);
+      const res = await app.request(
+        '/api/credentials/agent',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+        env
+      );
 
       expect(res.status).toBe(200); // Update returns 200, not 201
 
       // Existing-credential path now prepares an UPDATE (not INSERT) via raw DATABASE.
       const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
       const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
-      const updateSql = prepareCalls.find((sql) => sql.includes('UPDATE credentials') && sql.includes('encrypted_token'));
+      const updateSql = prepareCalls.find(
+        (sql) => sql.includes('UPDATE credentials') && sql.includes('encrypted_token')
+      );
       expect(updateSql).toBeDefined();
       const insertSql = prepareCalls.find((sql) => sql.includes('INSERT INTO credentials'));
       expect(insertSql).toBeUndefined();

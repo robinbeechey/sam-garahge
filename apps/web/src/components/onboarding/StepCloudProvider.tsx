@@ -1,7 +1,7 @@
 import type { CreateCredentialRequest } from '@simple-agent-manager/shared';
-import { PROVIDER_HELP,PROVIDER_LABELS } from '@simple-agent-manager/shared';
-import { Alert,Button, Input } from '@simple-agent-manager/ui';
-import { useRef,useState } from 'react';
+import { PROVIDER_HELP, PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import { Alert, Button, Input } from '@simple-agent-manager/ui';
+import { useRef, useState } from 'react';
 
 import { createCredential, validateCredential } from '../../lib/api';
 
@@ -29,6 +29,22 @@ interface StepCloudProviderProps {
   isComplete: boolean;
 }
 
+function getValidateButtonLabel(validating: boolean, isValidated: boolean): string {
+  if (validating) return 'Testing...';
+  if (isValidated) return 'Tested';
+  return 'Test connection';
+}
+
+function hasRequiredProviderFields(
+  provider: CloudProvider | null,
+  token: string,
+  scalewayProjectId: string
+): boolean {
+  if (provider === 'hetzner') return !!token.trim();
+  if (provider === 'scaleway') return !!token.trim() && !!scalewayProjectId.trim();
+  return false;
+}
+
 export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudProviderProps) {
   const [selectedProvider, setSelectedProvider] = useState<CloudProvider | null>(null);
   const [token, setToken] = useState('');
@@ -46,10 +62,16 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-success/10 mb-3">
           <span className="text-success text-xl">{'\u2713'}</span>
         </div>
-        <p className="sam-type-body text-fg-primary font-medium m-0 mb-1">Cloud provider connected</p>
-        <p className="sam-type-caption text-fg-muted m-0">You can manage your credentials in Settings.</p>
+        <p className="sam-type-body text-fg-primary font-medium m-0 mb-1">
+          Cloud provider connected
+        </p>
+        <p className="sam-type-caption text-fg-muted m-0">
+          You can manage your credentials in Settings.
+        </p>
         <div className="mt-4">
-          <Button variant="primary" size="md" onClick={onComplete}>Continue</Button>
+          <Button variant="primary" size="md" onClick={onComplete}>
+            Continue
+          </Button>
         </div>
       </div>
     );
@@ -69,7 +91,11 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
   const handleValidate = async () => {
     const data = getCredentialRequest();
     if (!data) {
-      setError(selectedProvider === 'scaleway' ? 'Scaleway Project ID is required' : 'Select a provider and enter a token');
+      setError(
+        selectedProvider === 'scaleway'
+          ? 'Scaleway Project ID is required'
+          : 'Select a provider and enter a token'
+      );
       return;
     }
     setValidating(true);
@@ -110,20 +136,21 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
   };
 
   const selectedDef = selectedProvider ? PROVIDERS.find((p) => p.id === selectedProvider) : null;
-  const isValid = selectedProvider === 'hetzner'
-    ? !!token.trim()
-    : !!token.trim() && !!scalewayProjectId.trim();
+  const isValid = hasRequiredProviderFields(selectedProvider, token, scalewayProjectId);
 
   return (
     <div>
       <h3 className="sam-type-section-heading text-fg-primary m-0 mb-1">Connect your cloud</h3>
       <p className="sam-type-body text-fg-muted m-0 mb-4">
-        SAM provisions VMs on <strong>your</strong> cloud account. You keep full control and pay your provider directly.
+        SAM provisions VMs on <strong>your</strong> cloud account. You keep full control and pay
+        your provider directly.
       </p>
 
       {error && (
         <div className="mb-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+          <Alert variant="error" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         </div>
       )}
 
@@ -154,7 +181,10 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
       {/* Token input */}
       {selectedDef && (
         <div className="mb-4">
-          <label htmlFor="cloud-provider-token" className="block text-sm font-medium text-fg-primary mb-1">
+          <label
+            htmlFor="cloud-provider-token"
+            className="block text-sm font-medium text-fg-primary mb-1"
+          >
             {selectedDef.name} API Token
           </label>
           <Input
@@ -162,20 +192,31 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
             type="password"
             autoComplete="off"
             value={token}
-            onChange={(e) => { setToken(e.target.value); setValidatedKey(null); setValidationMessage(null); }}
+            onChange={(e) => {
+              setToken(e.target.value);
+              setValidatedKey(null);
+              setValidationMessage(null);
+            }}
             placeholder={`Paste your ${selectedDef.name} API token`}
           />
 
           {selectedProvider === 'scaleway' && (
             <div className="mt-2">
-              <label htmlFor="scaleway-project-id" className="block text-sm font-medium text-fg-primary mb-1">
+              <label
+                htmlFor="scaleway-project-id"
+                className="block text-sm font-medium text-fg-primary mb-1"
+              >
                 Scaleway Project ID
               </label>
               <Input
                 id="scaleway-project-id"
                 type="text"
                 value={scalewayProjectId}
-                onChange={(e) => { setScalewayProjectId(e.target.value); setValidatedKey(null); setValidationMessage(null); }}
+                onChange={(e) => {
+                  setScalewayProjectId(e.target.value);
+                  setValidatedKey(null);
+                  setValidationMessage(null);
+                }}
                 placeholder="Your Scaleway project ID"
               />
             </div>
@@ -214,7 +255,7 @@ export function StepCloudProvider({ onComplete, onSkip, isComplete }: StepCloudP
             onClick={handleValidate}
             disabled={!isValid || validating || saving}
           >
-            {validating ? 'Testing...' : isValidated ? 'Tested' : 'Test connection'}
+            {getValidateButtonLabel(validating, isValidated)}
           </Button>
           <Button
             variant="primary"

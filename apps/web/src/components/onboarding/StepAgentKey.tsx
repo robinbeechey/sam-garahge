@@ -1,7 +1,7 @@
 import type { AgentType, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG } from '@simple-agent-manager/shared';
-import { Alert,Button, Input } from '@simple-agent-manager/ui';
-import { useRef,useState } from 'react';
+import { Alert, Button, Input } from '@simple-agent-manager/ui';
+import { useRef, useState } from 'react';
 
 import { saveAgentCredential, validateAgentCredential } from '../../lib/api';
 
@@ -9,6 +9,12 @@ interface StepAgentKeyProps {
   onComplete: () => void;
   onSkip: () => void;
   isComplete: boolean;
+}
+
+function getValidateButtonLabel(validating: boolean, isValidated: boolean): string {
+  if (validating) return 'Testing...';
+  if (isValidated) return 'Tested';
+  return 'Test key';
 }
 
 export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyProps) {
@@ -28,9 +34,13 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
           <span className="text-success text-xl">{'\u2713'}</span>
         </div>
         <p className="sam-type-body text-fg-primary font-medium m-0 mb-1">AI agent connected</p>
-        <p className="sam-type-caption text-fg-muted m-0">You can manage your agent keys in Settings.</p>
+        <p className="sam-type-caption text-fg-muted m-0">
+          You can manage your agent keys in Settings.
+        </p>
         <div className="mt-4">
-          <Button variant="primary" size="md" onClick={onComplete}>Continue</Button>
+          <Button variant="primary" size="md" onClick={onComplete}>
+            Continue
+          </Button>
         </div>
       </div>
     );
@@ -103,7 +113,9 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
 
       {error && (
         <div className="mb-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+          <Alert variant="error" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         </div>
       )}
 
@@ -182,7 +194,7 @@ export function StepAgentKey({ onComplete, onSkip, isComplete }: StepAgentKeyPro
             onClick={handleValidate}
             disabled={!selectedAgent || !apiKey.trim() || validating || saving}
           >
-            {validating ? 'Testing...' : isValidated ? 'Tested' : 'Test key'}
+            {getValidateButtonLabel(validating, isValidated)}
           </Button>
           <Button
             variant="primary"

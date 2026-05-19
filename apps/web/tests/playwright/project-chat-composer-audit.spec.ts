@@ -88,8 +88,18 @@ const AGENT_PROFILES = [
 ];
 
 const CACHED_COMMANDS = [
-  { agentType: 'openai-codex', name: 'review', description: 'Review current changes and identify risks.', updatedAt: Date.now() },
-  { agentType: 'openai-codex', name: 'test', description: 'Run the focused test suite for this session.', updatedAt: Date.now() },
+  {
+    agentType: 'openai-codex',
+    name: 'review',
+    description: 'Review current changes and identify risks.',
+    updatedAt: Date.now(),
+  },
+  {
+    agentType: 'openai-codex',
+    name: 'test',
+    description: 'Run the focused test suite for this session.',
+    updatedAt: Date.now(),
+  },
 ];
 
 const ACTIVE_SESSION = {
@@ -134,15 +144,27 @@ const PROVISIONING_SESSION = {
   },
 };
 
+function getSessionsForMode(mode: 'new' | 'active' | 'provisioning') {
+  if (mode === 'active') return [ACTIVE_SESSION];
+  if (mode === 'provisioning') return [PROVISIONING_SESSION];
+  return [];
+}
+
+function getSessionForMode(mode: 'new' | 'active' | 'provisioning') {
+  if (mode === 'provisioning') return PROVISIONING_SESSION;
+  return ACTIVE_SESSION;
+}
+
 function makeMessage(index: number) {
   const role = index % 2 === 0 ? 'user' : 'assistant';
   return {
     id: `message-${index}`,
     sessionId: ACTIVE_SESSION.id,
     role,
-    content: role === 'user'
-      ? `User asks about composer behavior ${index}: ${'long input text '.repeat(12)}`
-      : `Assistant response ${index}: Handles unicode, emoji, HTML entities &amp; wrapped content without clipping. ${'Detailed response. '.repeat(14)}`,
+    content:
+      role === 'user'
+        ? `User asks about composer behavior ${index}: ${'long input text '.repeat(12)}`
+        : `Assistant response ${index}: Handles unicode, emoji, HTML entities &amp; wrapped content without clipping. ${'Detailed response. '.repeat(14)}`,
     toolMetadata: null,
     createdAt: Date.now() - (40 - index) * 10_000,
     sequence: index,
@@ -159,7 +181,7 @@ async function screenshot(page: Page, name: string) {
 
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
+    () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
 }
@@ -167,7 +189,9 @@ async function assertNoOverflow(page: Page) {
 async function assertMobileTouchTargets(page: Page) {
   const isMobile = await page.evaluate(() => window.innerWidth <= 480);
   if (!isMobile) return;
-  const buttons = page.locator('textarea[role="combobox"] ~ button, button[aria-label="Attach files to this task"], button[aria-label="Attach files"]');
+  const buttons = page.locator(
+    'textarea[role="combobox"] ~ button, button[aria-label="Attach files to this task"], button[aria-label="Attach files"]'
+  );
   const count = await buttons.count();
   for (let index = 0; index < count; index += 1) {
     const box = await buttons.nth(index).boundingBox();
@@ -184,8 +208,12 @@ async function setupApiMocks(page: Page, mode: 'new' | 'active' | 'provisioning'
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
-    if (path.startsWith('/api/credentials')) return respond(200, [{ id: 'cred-1', provider: 'hetzner', name: 'Hetzner', createdAt: Date.now() }]);
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/credentials'))
+      return respond(200, [
+        { id: 'cred-1', provider: 'hetzner', name: 'Hetzner', createdAt: Date.now() },
+      ]);
     if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') {
       return respond(200, {
@@ -198,7 +226,13 @@ async function setupApiMocks(page: Page, mode: 'new' | 'active' | 'provisioning'
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);
     if (path === `/api/workspaces/${ACTIVE_SESSION.workspaceId}`) {
-      return respond(200, { id: ACTIVE_SESSION.workspaceId, name: 'Composer workspace', status: 'running', url: null, nodeId: null });
+      return respond(200, {
+        id: ACTIVE_SESSION.workspaceId,
+        name: 'Composer workspace',
+        status: 'running',
+        url: null,
+        nodeId: null,
+      });
     }
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
@@ -219,31 +253,31 @@ async function setupApiMocks(page: Page, mode: 'new' | 'active' | 'provisioning'
         });
       }
       if (subPath === '/sessions') {
-        const sessions = mode === 'active'
-          ? [ACTIVE_SESSION]
-          : mode === 'provisioning'
-            ? [PROVISIONING_SESSION]
-            : [];
+        const sessions = getSessionsForMode(mode);
         return respond(200, { sessions, total: sessions.length, hasMore: false });
       }
 
       const sessionDetailMatch = subPath.match(/^\/sessions\/([^/]+)$/);
       if (sessionDetailMatch) {
         return respond(200, {
-          session: mode === 'provisioning' ? PROVISIONING_SESSION : ACTIVE_SESSION,
+          session: getSessionForMode(mode),
           messages: Array.from({ length: 36 }, (_, index) => makeMessage(index)),
           hasMore: false,
         });
       }
 
       if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
-        return respond(200, Array.from({ length: 36 }, (_, index) => makeMessage(index)));
+        return respond(
+          200,
+          Array.from({ length: 36 }, (_, index) => makeMessage(index))
+        );
       }
 
       return respond(200, MOCK_PROJECT);
     }
 
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
 
     return respond(200, {});
@@ -251,7 +285,9 @@ async function setupApiMocks(page: Page, mode: 'new' | 'active' | 'provisioning'
 }
 
 test.describe('Project chat composer audit', () => {
-  test('new-chat composer handles controls, long text, slash, and mentions', async ({ page }, testInfo) => {
+  test('new-chat composer handles controls, long text, slash, and mentions', async ({
+    page,
+  }, testInfo) => {
     await setupApiMocks(page, 'new');
     await page.goto(`/projects/${MOCK_PROJECT.id}/chat`);
     await page.waitForTimeout(1200);
@@ -259,53 +295,85 @@ test.describe('Project chat composer audit', () => {
     const textarea = page.locator('textarea[role="combobox"]');
     await expect(textarea).toBeVisible();
     await expect(page.getByText('Run the tests and summarize what fails.')).toBeVisible();
-    await screenshot(page, `project-chat-composer-new-prompts-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await screenshot(
+      page,
+      `project-chat-composer-new-prompts-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    );
     await assertNoOverflow(page);
 
     await page.getByText('Run the tests and summarize what fails.').click();
     await expect(textarea).toHaveValue('Run the tests and summarize what fails.');
-    await textarea.fill(`Implement shared composer behavior with unicode π, emoji, HTML-like <button>, and ${'very long wrapping text '.repeat(16)}`);
+    await textarea.fill(
+      `Implement shared composer behavior with unicode π, emoji, HTML-like <button>, and ${'very long wrapping text '.repeat(16)}`
+    );
 
-    await expect(page.locator('select[aria-label="Workspace profile"], select#workspace-profile-select')).toBeVisible();
-    await expect(page.locator('select[aria-label="Run mode"], select#task-mode-select')).toBeVisible();
+    await expect(
+      page.locator('select[aria-label="Workspace profile"], select#workspace-profile-select')
+    ).toBeVisible();
+    await expect(
+      page.locator('select[aria-label="Run mode"], select#task-mode-select')
+    ).toBeVisible();
     await assertMobileTouchTargets(page);
-    await screenshot(page, `project-chat-composer-new-long-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await screenshot(
+      page,
+      `project-chat-composer-new-long-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    );
     await assertNoOverflow(page);
 
     await textarea.fill('/');
     await expect(page.getByText('/review')).toBeVisible();
-    await screenshot(page, `project-chat-composer-new-slash-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await screenshot(
+      page,
+      `project-chat-composer-new-slash-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    );
     await assertNoOverflow(page);
 
     await textarea.fill('@Open');
     await expect(page.getByText('@Open Code')).toBeVisible();
-    await screenshot(page, `project-chat-composer-new-mention-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await screenshot(
+      page,
+      `project-chat-composer-new-mention-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    );
     await assertNoOverflow(page);
   });
 
-  test('active follow-up composer has shared autocomplete without new-task controls', async ({ page }, testInfo) => {
+  test('active follow-up composer has shared autocomplete without new-task controls', async ({
+    page,
+  }, testInfo) => {
     await setupApiMocks(page, 'active');
     await page.goto(`/projects/${MOCK_PROJECT.id}/chat/${ACTIVE_SESSION.id}`);
     await page.waitForTimeout(1500);
 
     const textarea = page.locator('textarea[role="combobox"]');
     await expect(textarea).toBeVisible();
-    await expect(page.locator('select[aria-label="Workspace profile"], select#workspace-profile-select')).toHaveCount(0);
-    await expect(page.locator('select[aria-label="Run mode"], select#task-mode-select')).toHaveCount(0);
+    await expect(
+      page.locator('select[aria-label="Workspace profile"], select#workspace-profile-select')
+    ).toHaveCount(0);
+    await expect(
+      page.locator('select[aria-label="Run mode"], select#task-mode-select')
+    ).toHaveCount(0);
 
     await textarea.fill('/');
     await expect(page.getByText('/review')).toBeVisible();
     await assertMobileTouchTargets(page);
-    await screenshot(page, `project-chat-composer-followup-slash-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await screenshot(
+      page,
+      `project-chat-composer-followup-slash-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    );
     await assertNoOverflow(page);
 
     await textarea.fill('@Cod');
     await expect(page.getByText('@Codex')).toBeVisible();
-    await screenshot(page, `project-chat-composer-followup-mention-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await screenshot(
+      page,
+      `project-chat-composer-followup-mention-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    );
     await assertNoOverflow(page);
   });
 
-  test('restored provisioning session shows staged progress without overflow', async ({ page }, testInfo) => {
+  test('restored provisioning session shows staged progress without overflow', async ({
+    page,
+  }, testInfo) => {
     await setupApiMocks(page, 'provisioning');
     await page.goto(`/projects/${MOCK_PROJECT.id}/chat/${PROVISIONING_SESSION.id}`);
     await page.waitForTimeout(1500);
@@ -313,7 +381,10 @@ test.describe('Project chat composer audit', () => {
     await expect(page.getByText('Installing dependencies (3/4)')).toBeVisible();
     await expect(page.getByText(/Usually takes 2-4 minutes/)).toBeVisible();
     await expect(page.getByText('sam/provisioning-progress-with-long-branch-name')).toBeVisible();
-    await screenshot(page, `project-chat-provisioning-progress-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`);
+    await screenshot(
+      page,
+      `project-chat-provisioning-progress-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    );
     await assertNoOverflow(page);
   });
 });
