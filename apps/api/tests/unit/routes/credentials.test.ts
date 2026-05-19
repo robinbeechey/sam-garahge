@@ -146,6 +146,27 @@ describe('Credentials Routes - OAuth Support', () => {
       expect(body.validationMode).toBe('format');
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
+
+    it('validates Google API keys without placing the credential in the URL', async () => {
+      const res = await app.request('/api/credentials/agent/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentType: 'google-gemini',
+          credentialKind: 'api-key',
+          credential: 'google-api-key-1234567890',
+        }),
+      }, makeTestEnv());
+
+      expect(res.status).toBe(200);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'https://generativelanguage.googleapis.com/v1beta/models',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'x-goog-api-key': 'google-api-key-1234567890' }),
+        })
+      );
+      expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).not.toContain('google-api-key-1234567890');
+    });
   });
 
   describe('PUT /api/credentials/agent - OAuth credential save flow', () => {
