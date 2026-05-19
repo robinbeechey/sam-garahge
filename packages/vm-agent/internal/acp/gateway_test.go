@@ -453,18 +453,41 @@ func TestGenerateVibeConfig_DefaultModel(t *testing.T) {
 	}
 }
 
-func TestGenerateVibeConfig_CustomModel(t *testing.T) {
+func TestGenerateVibeConfig_DynamicVsBuiltin(t *testing.T) {
 	t.Parallel()
 
-	config := generateVibeConfig("devstral-2", nil)
-	if !strings.Contains(config, `active_model = "devstral-2"`) {
-		t.Errorf("expected active_model to be devstral-2, got:\n%s", config)
+	tests := []struct {
+		name           string
+		activeModel    string
+		wantEntries    int
+		wantDynamicDef bool // expect a [[models]] entry where name == alias == activeModel
+	}{
+		{"builtin alias has no extra entry", "devstral-2", 3, false},
+		{"raw API ID generates dynamic entry", "mistral-medium-3-5-2604", 4, true},
 	}
-	// All model aliases must still be present regardless of active model
-	for _, alias := range []string{"mistral-large", "devstral-2", "codestral"} {
-		if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, alias)) {
-			t.Errorf("missing model alias %q when active model is devstral-2", alias)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			config := generateVibeConfig(tt.activeModel, nil)
+
+			if !strings.Contains(config, fmt.Sprintf(`active_model = "%s"`, tt.activeModel)) {
+				t.Errorf("active_model not set to %q", tt.activeModel)
+			}
+			// Builtin aliases must always be present
+			for _, alias := range []string{"mistral-large", "devstral-2", "codestral"} {
+				if !strings.Contains(config, fmt.Sprintf(`alias = "%s"`, alias)) {
+					t.Errorf("missing builtin alias %q", alias)
+				}
+			}
+			if count := strings.Count(config, "[[models]]"); count != tt.wantEntries {
+				t.Errorf("expected %d [[models]] entries, got %d", tt.wantEntries, count)
+			}
+			if tt.wantDynamicDef {
+				if !strings.Contains(config, fmt.Sprintf(`name = "%s"`, tt.activeModel)) {
+					t.Errorf("dynamic entry missing name = %q", tt.activeModel)
+				}
+			}
+		})
 	}
 }
 
