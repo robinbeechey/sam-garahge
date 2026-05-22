@@ -34,27 +34,27 @@ The desired behavior is to distinguish agent-process crashes from normal prompt 
 
 ## Implementation Checklist
 
-- [ ] Add crash recovery fields to `SessionHost` and add `StatusRecovering` / `StatusRecovered`.
-- [ ] Add a structured `agent_crash_report` broadcast payload containing agent type, recovery result, attribution, stderr, truncation flag, suggestion, and timestamp.
-- [ ] Detect crash-like prompt errors in `finishPromptWithError()` (`EOF`, broken pipe, peer disconnected, connection reset) and, when the current agent can be recovered, set crash state and defer task completion to `monitorProcessExit()`.
-- [ ] Preserve normal timeout/cancel/non-crash prompt error behavior.
-- [ ] Teach process restart to pass the prior ACP session ID when crash recovery is active, not only for intentional prompt cancel.
-- [ ] Ensure crash recovery uses `LoadSession` only and fails rather than falling back to `NewSession` when `LoadSession` is unsupported or fails.
-- [ ] After successful crash recovery, send an `awaiting_followup` task callback and broadcast the crash report/status without auto-sending a follow-up prompt.
-- [ ] After failed crash recovery, fall back to terminal failure while still broadcasting the crash report with stderr.
-- [ ] Update `makeTaskCompletionCallback()` to treat the recovery stop reason as `awaiting_followup`.
-- [ ] Add focused Go tests for crash error classification, recovery callback behavior, crash report broadcast shape, and no-recovery cases.
-- [ ] Run VM agent Go tests and relevant repo validation.
+- [x] Add crash recovery fields to `SessionHost` and add `StatusRecovering` / `StatusRecovered`.
+- [x] Add a structured `agent_crash_report` broadcast payload containing agent type, recovery result, attribution, stderr, truncation flag, suggestion, and timestamp.
+- [x] Detect crash-like prompt errors in `finishPromptWithError()` (`EOF`, broken pipe, peer disconnected, connection reset) and, when the current agent can be recovered, set crash state and defer task completion to `monitorProcessExit()`.
+- [x] Preserve normal timeout/cancel/non-crash prompt error behavior.
+- [x] Teach process restart to pass the prior ACP session ID when crash recovery is active, not only for intentional prompt cancel.
+- [x] Ensure crash recovery uses `LoadSession` only and fails rather than falling back to `NewSession` when `LoadSession` is unsupported or fails.
+- [x] After successful crash recovery, send an `awaiting_followup` task callback and broadcast the crash report/status without auto-sending a follow-up prompt.
+- [x] After failed crash recovery, fall back to terminal failure while still broadcasting the crash report with stderr.
+- [x] Update `makeTaskCompletionCallback()` to treat the recovery stop reason as `awaiting_followup`.
+- [x] Add focused Go tests for crash error classification, recovery callback behavior, crash report broadcast shape, and no-recovery cases.
+- [x] Run VM agent Go tests and relevant repo validation.
 
 ## Acceptance Criteria
 
-- [ ] Agent crash mid-session triggers `LoadSession` recovery rather than immediate task failure.
-- [ ] Recovered sessions transition to `awaiting_followup` so the user can decide what to do next.
-- [ ] Crash report message is displayed to clients with agent name, fault attribution, stderr, and vendor-reporting suggestion.
-- [ ] Failed recovery still surfaces crash information before the task fails.
-- [ ] Existing cancel-restart behavior is not regressed.
-- [ ] Rapid exits under 5 seconds still follow the existing rapid-exit error path without recovery.
-- [ ] Recovery attempts still respect `maxRestartAttempts`.
+- [x] Agent crash mid-session triggers `LoadSession` recovery rather than immediate task failure.
+- [x] Recovered sessions transition to `awaiting_followup` so the user can decide what to do next.
+- [x] Crash report message is displayed to clients with agent name, fault attribution, stderr, and vendor-reporting suggestion.
+- [x] Failed recovery still surfaces crash information before the task fails.
+- [x] Existing cancel-restart behavior is not regressed.
+- [x] Rapid exits under 5 seconds still follow the existing rapid-exit error path without recovery.
+- [x] Recovery attempts still respect `maxRestartAttempts`.
 
 ## References
 

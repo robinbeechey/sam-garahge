@@ -12,6 +12,35 @@ function sessionUpdateMessage(update: Record<string, unknown>): AcpMessage {
 }
 
 describe('useAcpMessages tool call parsing', () => {
+  it('renders agent crash reports as conversation items', () => {
+    const { result } = renderHook(() => useAcpMessages());
+    const reportMessage = {
+      type: 'agent_crash_report',
+      agentType: 'claude-code',
+      recovered: true,
+      message: 'Claude Code exited unexpectedly. SAM restored the saved ACP session.',
+      attribution: "The crash points to a bug in Claude Code's agent process, not SAM's workspace runner.",
+      stderr: 'peer disconnected before response',
+      stderrTruncated: false,
+      suggestion: 'Review stderr before sharing it with Anthropic support.',
+      timestamp: '2026-05-22T01:23:45Z',
+    } satisfies Partial<AcpMessage>;
+
+    act(() => {
+      result.current.processMessage(reportMessage as AcpMessage);
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    const item = result.current.items[0];
+    expect(item?.kind).toBe('agent_crash_report');
+    if (item?.kind !== 'agent_crash_report') {
+      throw new Error('expected agent_crash_report item');
+    }
+    expect(item.recovered).toBe(true);
+    expect(item.attribution).toContain('not SAM');
+    expect(item.stderr).toContain('peer disconnected');
+  });
+
   it('extracts nested terminal text content from tool_call payloads', () => {
     const { result } = renderHook(() => useAcpMessages());
 

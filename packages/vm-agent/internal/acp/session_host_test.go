@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -737,6 +740,223 @@ func TestSessionHost_BroadcastAgentStatus(t *testing.T) {
 	}
 	if status.AgentType != "claude-code" {
 		t.Fatalf("agentType = %s, want claude-code", status.AgentType)
+	}
+}
+
+func TestIsCrashPromptError(t *testing.T) {
+	t.Parallel()
+
+	crashErrors := []error{
+		io.EOF,
+		fmt.Errorf("wrapped pipe: %w", syscall.EPIPE),
+		fmt.Errorf("wrapped reset: %w", syscall.ECONNRESET),
+		fmt.Errorf("connection closed, peer disconnected"),
+		fmt.Errorf("write: broken pipe"),
+		fmt.Errorf("read tcp: connection reset by peer"),
+		fmt.Errorf("write_stdin failed: stdin is closed for this session"),
+	}
+	for _, err := range crashErrors {
+		if !isCrashPromptError(err) {
+			t.Fatalf("isCrashPromptError(%q) = false, want true", err.Error())
+		}
+	}
+
+	if isCrashPromptError(context.DeadlineExceeded) {
+		t.Fatal("deadline exceeded should not be treated as an agent crash")
+	}
+	if isCrashPromptError(context.Canceled) {
+		t.Fatal("context canceled should not be treated as an agent crash")
+	}
+	if isCrashPromptError(errors.New("permission denied")) {
+		t.Fatal("unrelated errors should not be treated as agent crashes")
+	}
+}
+
+func TestRedactAgentDiagnosticText(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Join([]string{
+		"Authorization: Bearer secret-bearer-token-123456",
+		"OPENAI_API_KEY=sk-secret1234567890",
+		"GH_TOKEN=ghp_secret1234567890",
+		"SMOKE_TEST_TOKEN=sam_test_secret-token-123456",
+		"safe diagnostic line",
+	}, "\n")
+	got := redactAgentDiagnosticText(input)
+
+	for _, leaked := range []string{
+		"secret-bearer-token-123456",
+		"sk-secret1234567890",
+		"ghp_secret1234567890",
+		"sam_test_secret-token-123456",
+	} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("redacted text leaked %q: %s", leaked, got)
+		}
+	}
+	if !strings.Contains(got, "safe diagnostic line") {
+		t.Fatalf("redacted text removed safe diagnostic line: %s", got)
+	}
+}
+
+func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-1"
+	host.agentSupportsLoadSession = false
+	host.mu.Unlock()
+
+	if _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
+		t.Fatal("beginCrashRecovery succeeded without LoadSession support")
+	}
+
+	host.mu.Lock()
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	agentType, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	if !ok {
+		t.Fatal("beginCrashRecovery failed with LoadSession support")
+	}
+	if agentType != "openai-codex" {
+		t.Fatalf("agentType = %q, want openai-codex", agentType)
+	}
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false, want true")
+	}
+	if string(host.crashPromptReqID) != `"req-1"` {
+		t.Fatalf("crashPromptReqID = %s, want \"req-1\"", string(host.crashPromptReqID))
+	}
+	if host.crashPromptViewerID != "viewer-1" {
+		t.Fatalf("crashPromptViewerID = %q, want viewer-1", host.crashPromptViewerID)
+	}
+}
+
+func TestSessionHost_BroadcastAgentCrashReport(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	report := host.crashReport(crashRecoverySnapshot{
+		stderr:      "write_stdin failed: stdin is closed\nOPENAI_API_KEY=sk-secret1234567890",
+		agentType:   "openai-codex",
+		promptReqID: json.RawMessage(`"req-1"`),
+	}, true, "")
+	host.broadcastAgentCrashReport(report)
+
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+
+	if len(host.messageBuf) != 1 {
+		t.Fatalf("buffer length = %d, want 1", len(host.messageBuf))
+	}
+
+	var got AgentCrashReportMessage
+	if err := json.Unmarshal(host.messageBuf[0].Data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Type != MsgAgentCrashReport {
+		t.Fatalf("type = %s, want %s", got.Type, MsgAgentCrashReport)
+	}
+	if got.AgentType != "openai-codex" {
+		t.Fatalf("agentType = %q, want openai-codex", got.AgentType)
+	}
+	if !got.Recovered {
+		t.Fatal("recovered = false, want true")
+	}
+	if !strings.Contains(got.Attribution, "not SAM") {
+		t.Fatalf("attribution = %q, want SAM fault attribution", got.Attribution)
+	}
+	if !strings.Contains(got.Stderr, "stdin is closed") {
+		t.Fatalf("stderr = %q, want captured stderr", got.Stderr)
+	}
+	if strings.Contains(got.Stderr, "sk-secret1234567890") {
+		t.Fatalf("stderr leaked secret: %q", got.Stderr)
+	}
+	if !strings.Contains(got.Suggestion, "OpenAI") {
+		t.Fatalf("suggestion = %q, want OpenAI vendor attribution", got.Suggestion)
+	}
+	if strings.Contains(string(host.messageBuf[0].Data), "originalPromptId") {
+		t.Fatalf("crash report exposed originalPromptId: %s", string(host.messageBuf[0].Data))
+	}
+}
+
+func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	done := make(chan string, 1)
+	host.config.OnPromptComplete = func(stopReason string, promptErr error) {
+		if promptErr == nil {
+			t.Errorf("promptErr = nil, want rapid-exit error")
+		}
+		done <- stopReason
+	}
+
+	cmd := exec.Command("sh", "-c", "exit 1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	process := &AgentProcess{
+		agentType: "openai-codex",
+		cmd:       cmd,
+		startTime: time.Now(),
+		waitDone:  make(chan struct{}),
+	}
+
+	host.mu.Lock()
+	host.process = process
+	host.status = HostReady
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-1"
+	host.crashRecoveryInProgress = true
+	host.crashAgentType = "openai-codex"
+	host.crashStderr = "write_stdin failed: stdin is closed\nOPENAI_API_KEY=sk-secret1234567890"
+	host.mu.Unlock()
+
+	host.monitorProcessExit(context.Background(), process, "openai-codex", nil, nil)
+
+	select {
+	case stopReason := <-done:
+		if stopReason != "error" {
+			t.Fatalf("stopReason = %q, want error", stopReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt completion callback")
+	}
+
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+	if len(host.messageBuf) == 0 {
+		t.Fatal("message buffer empty, want crash report/status")
+	}
+	var report AgentCrashReportMessage
+	foundReport := false
+	for _, msg := range host.messageBuf {
+		if err := json.Unmarshal(msg.Data, &report); err == nil && report.Type == MsgAgentCrashReport {
+			foundReport = true
+			break
+		}
+	}
+	if !foundReport {
+		t.Fatalf("crash report not broadcast; buffered messages = %d", len(host.messageBuf))
+	}
+	if report.Recovered {
+		t.Fatal("recovered = true, want false for rapid exit")
+	}
+	if strings.Contains(report.Stderr, "sk-secret1234567890") {
+		t.Fatalf("crash report leaked secret: %q", report.Stderr)
 	}
 }
 

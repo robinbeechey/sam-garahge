@@ -1,0 +1,164 @@
+package acp
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"regexp"
+	"strings"
+	"syscall"
+	"time"
+)
+
+const crashRecoveredStopReason = "recovered"
+
+var diagnosticRedactionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
+	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
+	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
+	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
+	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
+	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
+}
+
+func isCrashPromptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	crashPatterns := []string{
+		"broken pipe",
+		"connection reset",
+		"connection closed",
+		"peer disconnected",
+		"stdin is closed",
+		"unexpected eof",
+	}
+	for _, pattern := range crashPatterns {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func redactAgentDiagnosticText(text string) string {
+	redacted := text
+	for _, pattern := range diagnosticRedactionPatterns {
+		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
+			submatches := pattern.FindStringSubmatch(match)
+			if len(submatches) >= 3 {
+				return submatches[1] + "[REDACTED]"
+			}
+			if len(submatches) >= 2 && strings.HasSuffix(strings.ToLower(submatches[1]), " ") {
+				return submatches[1] + "[REDACTED]"
+			}
+			return "[REDACTED]"
+		})
+	}
+	return redacted
+}
+
+func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, bool) {
+	stderr := redactAgentDiagnosticText(h.peekStderr())
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.sessionID == "" || !h.agentSupportsLoadSession || h.agentType == "" {
+		return "", false
+	}
+
+	h.crashRecoveryInProgress = true
+	h.crashStderr = stderr
+	h.crashAgentType = h.agentType
+	h.crashPromptReqID = append(json.RawMessage(nil), reqID...)
+	h.crashPromptViewerID = viewerID
+	h.status = HostStarting
+	h.statusErr = ""
+	return h.agentType, true
+}
+
+type crashRecoverySnapshot struct {
+	inProgress     bool
+	stderr         string
+	agentType      string
+	promptReqID    json.RawMessage
+	promptViewerID string
+}
+
+func (h *SessionHost) crashRecoverySnapshotLocked() crashRecoverySnapshot {
+	return crashRecoverySnapshot{
+		inProgress:     h.crashRecoveryInProgress,
+		stderr:         h.crashStderr,
+		agentType:      h.crashAgentType,
+		promptReqID:    append(json.RawMessage(nil), h.crashPromptReqID...),
+		promptViewerID: h.crashPromptViewerID,
+	}
+}
+
+func (h *SessionHost) clearCrashRecoveryLocked() {
+	h.crashRecoveryInProgress = false
+	h.crashStderr = ""
+	h.crashAgentType = ""
+	h.crashPromptReqID = nil
+	h.crashPromptViewerID = ""
+}
+
+func (h *SessionHost) crashReport(snapshot crashRecoverySnapshot, recovered bool, recoveryErr string) AgentCrashReportMessage {
+	agentType := snapshot.agentType
+	if agentType == "" {
+		agentType = h.AgentType()
+	}
+	displayName := agentDisplayName(agentType)
+
+	message := fmt.Sprintf("The %s agent crashed unexpectedly. SAM recovered your session automatically. You can continue your conversation.", displayName)
+	if !recovered {
+		message = fmt.Sprintf("The %s agent crashed unexpectedly. SAM could not recover the session automatically.", displayName)
+	}
+
+	return AgentCrashReportMessage{
+		Type:            MsgAgentCrashReport,
+		AgentType:       agentType,
+		Recovered:       recovered,
+		Message:         message,
+		Attribution:     fmt.Sprintf("The crash points to a bug in %s's agent process, not SAM's workspace runner.", displayName),
+		Stderr:          redactAgentDiagnosticText(snapshot.stderr),
+		StderrTruncated: len(snapshot.stderr) >= h.config.StderrBufferBytes,
+		Suggestion:      fmt.Sprintf("Please report this to %s with the redacted debugging information above. Review diagnostics before sharing them outside your team.", agentVendorName(agentType)),
+		Timestamp:       time.Now().UTC(),
+		RecoveryError:   recoveryErr,
+	}
+}
+
+func agentDisplayName(agentType string) string {
+	switch agentType {
+	case "openai-codex":
+		return "Codex"
+	case "claude-code":
+		return "Claude Code"
+	case "opencode":
+		return "OpenCode"
+	case "amp":
+		return "Amp"
+	default:
+		if agentType == "" {
+			return "agent"
+		}
+		return agentType
+	}
+}
+
+func agentVendorName(agentType string) string {
+	switch agentType {
+	case "openai-codex":
+		return "OpenAI"
+	case "claude-code":
+		return "Anthropic"
+	default:
+		return agentDisplayName(agentType)
+	}
+}

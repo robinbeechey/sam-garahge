@@ -12,7 +12,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	err := process.Wait()
 
 	time.Sleep(100 * time.Millisecond)
-	stderrOutput := h.getAndClearStderr()
+	stderrOutput := redactAgentDiagnosticText(h.getAndClearStderr())
 	uptime := time.Since(process.startTime)
 	exitInfo := agentExitInfo(err)
 	slog.Info("Agent process exited", "agentType", agentType, "uptime", uptime.Round(time.Millisecond), "exitInfo", exitInfo, "stderrBytes", len(stderrOutput))
@@ -27,6 +27,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	intentionalPromptCancel := h.intentionalPromptCancelProcessStop
 	h.intentionalPromptCancelProcessStop = false
 	previousAcpSessionID := string(h.sessionID)
+	crashRecovery := h.crashRecoverySnapshotLocked()
 	h.mu.Unlock()
 
 	if isRapidExit && !intentionalPromptCancel {
@@ -50,10 +51,14 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 
 	if isRapidExit && !intentionalPromptCancel {
 		h.clearCurrentAgentSessionLocked()
+		if crashRecovery.inProgress {
+			h.clearCrashRecoveryLocked()
+		}
 		h.status = HostError
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)
 		h.statusErr = errMsg
 		h.mu.Unlock()
+		h.finishCrashRecoveryFailure(crashRecovery, errMsg, fmt.Errorf("%s", errMsg))
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
 		return
 	}
@@ -61,7 +66,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 	h.restartCount++
 	maxRestarts := h.maxRestartAttempts()
 	if h.restartCount > maxRestarts {
-		h.handleMaxRestartsExceededLocked(agentType, stderrOutput, maxRestarts)
+		h.handleMaxRestartsExceededLocked(agentType, stderrOutput, maxRestarts, crashRecovery)
 		return
 	}
 
@@ -80,14 +85,24 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process *AgentProc
 		return
 	}
 	loadSessionID := ""
-	if intentionalPromptCancel {
+	if intentionalPromptCancel || crashRecovery.inProgress {
 		loadSessionID = previousAcpSessionID
 	}
-	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID) {
+	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery) {
 		return
+	}
+	if crashRecovery.inProgress {
+		h.clearCrashRecoveryLocked()
 	}
 	h.mu.Unlock()
 
+	if crashRecovery.inProgress {
+		h.broadcastAgentStatus(StatusRecovered, agentType, "")
+		h.broadcastAgentCrashReport(h.crashReport(crashRecovery, true, ""))
+		h.notifyPromptComplete(crashRecoveredStopReason, nil)
+		h.reportActivity("idle")
+		return
+	}
 	h.broadcastAgentStatus(StatusReady, agentType, "")
 }
 
@@ -110,6 +125,7 @@ func (h *SessionHost) clearCurrentAgentSessionLocked() {
 	h.process = nil
 	h.acpConn = nil
 	h.sessionID = ""
+	h.agentSupportsLoadSession = false
 }
 
 func (h *SessionHost) maxRestartAttempts() int {
@@ -119,9 +135,12 @@ func (h *SessionHost) maxRestartAttempts() int {
 	return 3
 }
 
-func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput string, maxRestarts int) {
+func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput string, maxRestarts int, crashRecovery crashRecoverySnapshot) {
 	slog.Error("Agent exceeded max restart attempts", "maxRestarts", maxRestarts)
 	h.clearCurrentAgentSessionLocked()
+	if crashRecovery.inProgress {
+		h.clearCrashRecoveryLocked()
+	}
 	h.status = HostError
 	crashMsg := "Agent crashed and could not be restarted"
 	if stderrOutput != "" {
@@ -129,16 +148,27 @@ func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput st
 	}
 	h.statusErr = crashMsg
 	h.mu.Unlock()
+	h.finishCrashRecoveryFailure(crashRecovery, crashMsg, fmt.Errorf("%s", crashMsg))
 	h.broadcastAgentStatus(StatusError, agentType, crashMsg)
 	h.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
 }
 
-func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string) bool {
-	if err := h.startAgent(ctx, agentType, cred, settings, previousAcpSessionID); err != nil {
+func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string, crashRecovery crashRecoverySnapshot) bool {
+	var err error
+	if crashRecovery.inProgress {
+		err = h.startAgentForCrashRecovery(ctx, agentType, cred, settings, previousAcpSessionID)
+	} else {
+		err = h.startAgent(ctx, agentType, cred, settings, previousAcpSessionID)
+	}
+	if err != nil {
 		h.status = HostError
 		h.statusErr = err.Error()
+		if crashRecovery.inProgress {
+			h.clearCrashRecoveryLocked()
+		}
 		h.mu.Unlock()
 		slog.Error("Agent restart failed", "error", err)
+		h.finishCrashRecoveryFailure(crashRecovery, err.Error(), err)
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
 		return false
@@ -146,4 +176,12 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 	h.status = HostReady
 	h.statusErr = ""
 	return true
+}
+
+func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnapshot, message string, err error) {
+	if !crashRecovery.inProgress {
+		return
+	}
+	h.broadcastAgentCrashReport(h.crashReport(crashRecovery, false, message))
+	h.notifyPromptComplete("error", err)
 }

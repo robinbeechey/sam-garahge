@@ -3,6 +3,7 @@ package acp
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -48,6 +49,10 @@ const (
 	ampMcpRemotePackage = "mcp-remote@0.1.38"
 	ampMcpTokenEnvVar   = "SAM_MCP_TOKEN"
 )
+
+// DefaultStderrBufferBytes is the default maximum agent stderr captured for
+// crash reports. Override via ACP_STDERR_BUFFER_BYTES.
+const DefaultStderrBufferBytes = 4096
 
 // buildAcpMcpServers converts McpServerEntry configs into acpsdk.McpServer
 // entries for NewSession/LoadSession requests.
@@ -133,6 +138,10 @@ type SessionHostConfig struct {
 	// channel is full, messages are dropped for that viewer.
 	ViewerSendBuffer int
 
+	// StderrBufferBytes is the maximum agent stderr captured for crash reports.
+	// Override via ACP_STDERR_BUFFER_BYTES. Default: 4096 bytes.
+	StderrBufferBytes int
+
 	// NotifSerializeTimeout is the maximum time to wait for a previous
 	// notification handler to complete before delivering the next notification
 	// to the SDK. This serializes session/update processing to prevent the
@@ -180,8 +189,11 @@ type SessionHost struct {
 	sessionID      acpsdk.SessionId
 	restartCount   int
 	permissionMode string
-	status         SessionHostStatus
-	statusErr      string
+	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
+	// handling can decide whether a process crash is recoverable.
+	agentSupportsLoadSession bool
+	status                   SessionHostStatus
+	statusErr                string
 	// intentionalPromptCancelProcessStop suppresses rapid-exit crash handling
 	// when a user cancel intentionally terminates an agent that lacks native
 	// session/cancel support.
@@ -221,6 +233,15 @@ type SessionHost struct {
 	// Protected by promptCancelMu.
 	promptCancelRequested bool
 
+	// Crash recovery state (guarded by mu). When a prompt fails because the
+	// agent process disconnected, finishPromptWithError records this context
+	// and lets monitorProcessExit attempt LoadSession recovery.
+	crashRecoveryInProgress bool
+	crashStderr             string
+	crashAgentType          string
+	crashPromptReqID        json.RawMessage
+	crashPromptViewerID     string
+
 	// Stderr collection
 	stderrMu  sync.Mutex
 	stderrBuf strings.Builder
@@ -241,6 +262,9 @@ func NewSessionHost(config SessionHostConfig) *SessionHost {
 	}
 	if config.ViewerSendBuffer <= 0 {
 		config.ViewerSendBuffer = DefaultViewerSendBuffer
+	}
+	if config.StderrBufferBytes <= 0 {
+		config.StderrBufferBytes = DefaultStderrBufferBytes
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -685,7 +709,7 @@ func (h *SessionHost) monitorStderr(process *AgentProcess) {
 		line := scanner.Text()
 		slog.Warn("Agent stderr", "line", line)
 		h.stderrMu.Lock()
-		if h.stderrBuf.Len() < 4096 {
+		if h.stderrBuf.Len() < h.config.StderrBufferBytes {
 			if h.stderrBuf.Len() > 0 {
 				h.stderrBuf.WriteByte('\n')
 			}
@@ -701,6 +725,12 @@ func (h *SessionHost) getAndClearStderr() string {
 	s := h.stderrBuf.String()
 	h.stderrBuf.Reset()
 	return s
+}
+
+func (h *SessionHost) peekStderr() string {
+	h.stderrMu.Lock()
+	defer h.stderrMu.Unlock()
+	return h.stderrBuf.String()
 }
 
 // silentErrorPatterns are stderr substrings that indicate an API-level error
@@ -763,6 +793,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	}
 	h.acpConn = nil
 	h.sessionID = ""
+	h.agentSupportsLoadSession = false
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
 	h.credAuthFilePath = ""
