@@ -26,10 +26,17 @@ export interface McpTokenEnv {
 
 /** Data stored alongside each MCP token in KV */
 export interface McpTokenData {
+  /**
+   * Task ID for task-runner dispatched sessions. Empty string for direct
+   * project-chat sessions (no task row exists). Tools that require a real
+   * task guard on `!tokenData.taskId` which correctly rejects empty strings.
+   */
   taskId: string;
   projectId: string;
   userId: string;
   workspaceId: string;
+  chatSessionId?: string;
+  agentSessionId?: string;
   createdAt: string;
   /** ISO timestamp of last sliding window refresh (set on first refresh) */
   lastRefreshedAt?: string;

@@ -15,6 +15,7 @@ import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateAgentSessionSchema, jsonValidator, UpdateAgentSessionSchema } from '../../schemas';
 import { getRuntimeLimits } from '../../services/limits';
+import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
 import {
   createAgentSessionOnNode,
   resumeAgentSessionOnNode,
@@ -100,7 +101,30 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
     updatedAt: now,
   });
 
+  let mcpToken: string | null = null;
   try {
+    if (workspace.projectId) {
+      mcpToken = generateMcpToken();
+      await storeMcpToken(
+        c.env.KV,
+        mcpToken,
+        {
+          // Empty taskId for direct project-chat sessions — only task-runner dispatched
+          // sessions have a real task row. Setting sessionId as taskId was wrong because
+          // MCP tools query tasks by this ID and would get "Task not found". Empty string
+          // is falsy so tools guarding on !tokenData.taskId correctly reject early.
+          taskId: '',
+          projectId: workspace.projectId,
+          userId,
+          workspaceId: workspace.id,
+          chatSessionId: workspace.chatSessionId ?? undefined,
+          agentSessionId: sessionId,
+          createdAt: new Date().toISOString(),
+        },
+        c.env,
+      );
+    }
+
     await createAgentSessionOnNode(
       workspace.nodeId,
       workspace.id,
@@ -110,8 +134,24 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
       userId,
       workspace.chatSessionId,
       workspace.projectId,
+      mcpToken
+        ? {
+            url: `https://api.${c.env.BASE_DOMAIN}/mcp`,
+            token: mcpToken,
+          }
+        : undefined,
     );
   } catch (err) {
+    if (mcpToken) {
+      await revokeMcpToken(c.env.KV, mcpToken).catch((revokeErr) => {
+        log.warn('agent_session.mcp_token_revoke_failed', {
+          sessionId,
+          workspaceId: workspace.id,
+          error: revokeErr instanceof Error ? revokeErr.message : String(revokeErr),
+        });
+      });
+    }
+
     await db
       .update(schema.agentSessions)
       .set({
