@@ -17,17 +17,17 @@ Cloud provider credentials and agent API keys can be accepted without a user-vis
 
 ## Implementation Checklist
 
-- [ ] Add typed credential validation result helpers in `apps/api/src/services/validation.ts` for Hetzner, Scaleway, Anthropic, and OpenAI provider checks.
-- [ ] Preserve existing explicit validation endpoints with clear failure responses.
-- [ ] Update cloud-provider save to call live validation before encryption but continue saving with `validation.valid === false` warnings.
-- [ ] Update agent credential save to validate API keys live before encryption but continue saving with warnings; keep OAuth credentials format-only.
-- [ ] Return validation metadata from save responses without exposing credential material.
-- [ ] Update web API types and credential settings/onboarding UI to show saving/test progress, green success, and red warning/error messages.
-- [ ] Make onboarding Connect validate-on-save and not require a separate Test action before saving.
-- [ ] Add unit tests for provider validation helpers with mocked `fetch`.
-- [ ] Add route tests proving validation success and warning-mode failure save responses.
-- [ ] Add/adjust web unit or Playwright coverage for validation feedback surfaces.
-- [ ] Run required quality gates, specialist review, staging verification, and create a do-not-merge PR.
+- [x] Add typed credential validation result helpers in `apps/api/src/services/validation.ts` for Hetzner, Scaleway, Anthropic, and OpenAI provider checks.
+- [x] Preserve existing explicit validation endpoints with clear failure responses.
+- [x] Update cloud-provider save to call live validation before encryption but continue saving with `validation.valid === false` warnings.
+- [x] Update agent credential save to validate API keys live before encryption but continue saving with warnings; keep OAuth credentials format-only.
+- [x] Return validation metadata from save responses without exposing credential material.
+- [x] Update web API types and credential settings/onboarding UI to show saving/test progress, green success, and red warning/error messages.
+- [x] Make onboarding Connect validate-on-save and not require a separate Test action before saving.
+- [x] Add unit tests for provider validation helpers with mocked `fetch`.
+- [x] Add route tests proving validation success and warning-mode failure save responses.
+- [x] Add/adjust web unit or Playwright coverage for validation feedback surfaces.
+- [x] Run required quality gates, specialist review, staging verification, and create a do-not-merge PR.
 
 ## Acceptance Criteria
 
@@ -44,3 +44,10 @@ Cloud provider credentials and agent API keys can be accepted without a user-vis
 - Do not merge. Leave a PR ready for human review.
 - Coordinate before staging deploy and do not deploy concurrently with another active staging run.
 - Do not touch unrelated dirty `.codex/` workspace files.
+
+## Verification Evidence
+
+- Full quality suite passed: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- Playwright visual audit passed on mobile 375x667 and desktop 1280x800.
+- Deploy Staging workflow passed for branch `sam/add-credential-validation-entry-01ksa6`: https://github.com/raphaeltm/simple-agent-manager/actions/runs/26331230963
+- Live staging Playwright/API verification passed: dashboard, projects, cloud provider settings, and agent key settings loaded with zero console errors; saving a temporary invalid OpenAI Codex API key returned `201` with `validation.valid=false`, provider status `401`, and warning-mode persistence; the temporary credential was deleted; explicit validation returned `400`.
