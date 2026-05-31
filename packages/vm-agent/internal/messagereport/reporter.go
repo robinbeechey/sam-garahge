@@ -18,6 +18,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// truncationMarker is appended to content that was truncated.
+const truncationMarker = "\n\n[truncated]"
+
 // Message is the unit of work enqueued into the outbox.
 type Message struct {
 	MessageID    string `json:"messageId"`
@@ -73,6 +76,9 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	}
 	if cfg.BatchMaxBytes <= 0 {
 		cfg.BatchMaxBytes = defaults.BatchMaxBytes
+	}
+	if cfg.MaxMessageContentBytes <= 0 {
+		cfg.MaxMessageContentBytes = defaults.MaxMessageContentBytes
 	}
 	if cfg.OutboxMaxSize <= 0 {
 		cfg.OutboxMaxSize = defaults.OutboxMaxSize
@@ -249,6 +255,21 @@ func (r *Reporter) Enqueue(msg Message) error {
 			"role", msg.Role,
 			"action", "rejected")
 		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
+	}
+
+	// Truncate oversized content to prevent permanent message loss. The
+	// Cloudflare Worker enforces a ~262 KB request body limit; messages
+	// exceeding that cause a 400 which sendBatch() treats as permanent,
+	// deleting the batch from the outbox.
+	maxBytes := r.cfg.MaxMessageContentBytes
+	if len(msg.Content) > maxBytes {
+		slog.Warn("messagereport: truncating oversized message content",
+			"messageId", msg.MessageID,
+			"originalBytes", len(msg.Content),
+			"maxBytes", maxBytes,
+			"workspaceId", workspaceID,
+		)
+		msg.Content = msg.Content[:maxBytes] + truncationMarker
 	}
 
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.

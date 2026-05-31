@@ -467,8 +467,44 @@ func (h *SessionHost) CancelPromptFromControlPlane() {
 	}
 
 	h.CancelPrompt()
-	h.ForwardToAgent([]byte(`{"jsonrpc":"2.0","method":"session/cancel","params":{}}`))
+	cancelMessage, err := h.cancelNotification()
+	if err != nil {
+		slog.Warn("CancelPromptFromControlPlane: could not build session/cancel notification", "error", err)
+	} else {
+		h.ForwardToAgent(cancelMessage)
+	}
 	h.StopProcessForPromptCancel()
+}
+
+func (h *SessionHost) cancelNotification() ([]byte, error) {
+	sessionID := h.currentSessionIDForCancel()
+	if sessionID == "" {
+		return nil, fmt.Errorf("missing session ID")
+	}
+
+	return json.Marshal(struct {
+		JSONRPC string `json:"jsonrpc"`
+		Method  string `json:"method"`
+		Params  struct {
+			SessionID string `json:"sessionId"`
+		} `json:"params"`
+	}{
+		JSONRPC: "2.0",
+		Method:  "session/cancel",
+		Params: struct {
+			SessionID string `json:"sessionId"`
+		}{SessionID: sessionID},
+	})
+}
+
+func (h *SessionHost) currentSessionIDForCancel() string {
+	h.mu.RLock()
+	acpSessionID := string(h.sessionID)
+	h.mu.RUnlock()
+	if acpSessionID != "" {
+		return acpSessionID
+	}
+	return h.config.SessionID
 }
 
 func (h *SessionHost) cancelPrompt(startGraceTimer bool) {
@@ -664,21 +700,27 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	}
 
 	if settings.PermissionMode != "" && settings.PermissionMode != "default" {
-		slog.Info("ACP: setting session mode", "mode", settings.PermissionMode)
-		if _, err := h.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
-			SessionId: h.sessionID,
-			ModeId:    acpsdk.SessionModeId(settings.PermissionMode),
-		}); err != nil {
-			slog.Warn("ACP SetSessionMode failed (non-fatal)", "mode", settings.PermissionMode, "error", err)
-			h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{
-				"mode":  settings.PermissionMode,
-				"error": err.Error(),
-			})
+		// Codex (openai-codex) does not support SetSessionMode — skip to avoid
+		// a guaranteed error on every session start.
+		if h.agentType == "openai-codex" {
+			slog.Info("ACP: skipping SetSessionMode for openai-codex (unsupported)", "mode", settings.PermissionMode)
 		} else {
-			slog.Info("ACP: session mode set", "mode", settings.PermissionMode)
-			h.reportLifecycle("info", "ACP session mode applied", map[string]interface{}{
-				"mode": settings.PermissionMode,
-			})
+			slog.Info("ACP: setting session mode", "mode", settings.PermissionMode)
+			if _, err := h.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
+				SessionId: h.sessionID,
+				ModeId:    acpsdk.SessionModeId(settings.PermissionMode),
+			}); err != nil {
+				slog.Warn("ACP SetSessionMode failed (non-fatal)", "mode", settings.PermissionMode, "error", err)
+				h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{
+					"mode":  settings.PermissionMode,
+					"error": err.Error(),
+				})
+			} else {
+				slog.Info("ACP: session mode set", "mode", settings.PermissionMode)
+				h.reportLifecycle("info", "ACP session mode applied", map[string]interface{}{
+					"mode": settings.PermissionMode,
+				})
+			}
 		}
 	}
 }
