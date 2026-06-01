@@ -1209,6 +1209,111 @@ func TestSessionHost_CancelPromptFromControlPlane_ForwardsSessionCancel(t *testi
 	}
 }
 
+func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:          "test-session",
+			WorkspaceID:        "test-workspace",
+			MaxRestartAttempts: 1,
+			ContainerResolver:  func() (string, error) { return "", errors.New("container unavailable") },
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	cmd := exec.Command("sh", "-c", "exit 0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	process := &AgentProcess{
+		agentType: "claude-code",
+		cmd:       cmd,
+		startTime: time.Now().Add(-10 * time.Second),
+		waitDone:  make(chan struct{}),
+	}
+
+	host.mu.Lock()
+	host.process = process
+	host.status = HostReady
+	host.agentType = "claude-code"
+	host.sessionID = "acp-session-1"
+	host.restartCount = 1
+	host.intentionalPromptCancelProcessStop = true
+	host.mu.Unlock()
+
+	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+
+	host.mu.RLock()
+	restartCount := host.restartCount
+	statusErr := host.statusErr
+	host.mu.RUnlock()
+
+	if restartCount != 1 {
+		t.Fatalf("restartCount = %d, want 1 after intentional prompt cancel", restartCount)
+	}
+	if strings.Contains(statusErr, "could not be restarted") {
+		t.Fatalf("statusErr = %q, expected restart attempt rather than max-restarts failure", statusErr)
+	}
+	if !strings.Contains(statusErr, "container unavailable") {
+		t.Fatalf("statusErr = %q, expected restart attempt failure from container resolver", statusErr)
+	}
+}
+
+func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:          "test-session",
+			WorkspaceID:        "test-workspace",
+			MaxRestartAttempts: 1,
+		},
+		MessageBufferSize: 100,
+		ViewerSendBuffer:  32,
+	})
+	defer host.Stop()
+
+	cmd := exec.Command("sh", "-c", "exit 0")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start command: %v", err)
+	}
+	process := &AgentProcess{
+		agentType: "claude-code",
+		cmd:       cmd,
+		startTime: time.Now().Add(-10 * time.Second),
+		waitDone:  make(chan struct{}),
+	}
+
+	host.mu.Lock()
+	host.process = process
+	host.status = HostReady
+	host.agentType = "claude-code"
+	host.sessionID = "acp-session-1"
+	host.restartCount = 1
+	host.mu.Unlock()
+
+	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+
+	host.mu.RLock()
+	restartCount := host.restartCount
+	status := host.status
+	statusErr := host.statusErr
+	host.mu.RUnlock()
+
+	if restartCount != 2 {
+		t.Fatalf("restartCount = %d, want 2 after unexpected exit", restartCount)
+	}
+	if status != HostError {
+		t.Fatalf("status = %s, want %s", status, HostError)
+	}
+	if !strings.Contains(statusErr, "could not be restarted") {
+		t.Fatalf("statusErr = %q, expected max-restarts failure", statusErr)
+	}
+}
+
 func TestSessionHost_CancelPrompt_ConcurrentSafety(t *testing.T) {
 	t.Parallel()
 
