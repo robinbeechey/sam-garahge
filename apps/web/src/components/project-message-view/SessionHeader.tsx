@@ -1,7 +1,7 @@
 import type { DetectedPort, NodeResponse, TaskDetailResponse, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { AlertTriangle, Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Copy, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
+import { AlertTriangle, Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Cpu, ExternalLink, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
 import { type CSSProperties, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
@@ -10,7 +10,10 @@ import type { ChatSessionResponse } from '../../lib/api';
 import { deleteWorkspace, getPortAccessUrl, getProjectTask, updateProjectTaskStatus } from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
+import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
+import { CopyableId } from './CopyableId';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
+import { SessionSourceContextRow } from './SessionSourceContextRow';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
@@ -30,34 +33,6 @@ function ContextItem({ icon, label, children }: { icon: React.ReactNode; label: 
 function formatVmSize(size: string): string {
   const config = VM_SIZE_LABELS[size as VMSize];
   return config ? config.label : size;
-}
-
-/** Copyable reference ID pill — click to copy the full value, shows truncated display. */
-function CopyableId({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(value).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [value]);
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      title={`${label}: ${value} — click to copy`}
-      className="inline-flex items-center gap-1 text-[11px] font-mono px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.10)] bg-[rgba(8,15,12,0.5)]-default cursor-pointer hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors min-w-0"
-      style={{ color: copied ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)' }}
-    >
-      {icon && <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>}
-      <span className="shrink-0 text-[10px] font-sans font-medium opacity-70">{label}</span>
-      <span className="truncate min-w-0">{value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value}</span>
-      <span className="shrink-0" aria-hidden="true">
-        {copied ? <CheckCircle2 size={10} /> : <Copy size={10} />}
-      </span>
-    </button>
-  );
 }
 
 /** Format a duration in ms to a human-readable string. */
@@ -224,6 +199,7 @@ export function SessionHeader({
   onRetry,
   onFork,
   lineageText,
+  sourceContext,
   hasContentBelow = false,
 }: {
   projectId: string;
@@ -242,6 +218,8 @@ export function SessionHeader({
   onFork?: () => void;
   /** Lineage subtitle for retries/forks (e.g., "↩ attempt 3"). */
   lineageText?: string;
+  /** Parent/source details for forked or retried sessions. */
+  sourceContext?: SessionSourceContext;
   /** When true, suppress bottom rounding and glow (content follows below). */
   hasContentBelow?: boolean;
 }) {
@@ -586,6 +564,8 @@ export function SessionHeader({
               </div>
             </div>
           )}
+
+          {sourceContext && <SessionSourceContextRow projectId={projectId} sourceContext={sourceContext} />}
 
           {/* Action buttons — wraps on narrow viewports */}
           <div className="flex flex-wrap items-center gap-1.5">
