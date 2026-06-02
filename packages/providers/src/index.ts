@@ -11,6 +11,10 @@ export type {
   LocationMeta,
   Provider,
   ProviderConfig,
+  ProviderErrorContext,
+  ProviderErrorContextValue,
+  ProviderLogContext,
+  ProviderLogger,
   ScalewayProviderConfig,
   SizeConfig,
   VMConfig,
@@ -25,6 +29,7 @@ export { getTimeoutMs,providerFetch } from './provider-fetch';
 // Re-export providers
 export type { GcpTokenProvider } from './gcp';
 export { DEFAULT_GCP_AGENT_PORTS, DEFAULT_GCP_FIREWALL_SOURCE_RANGES, GCP_LOCATIONS,GcpProvider } from './gcp';
+export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
   DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
   DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
@@ -49,7 +54,10 @@ export function createProvider(config: ProviderConfig): Provider {
         config.placementFallbackEnabled,
         config.capacityRetryInitialDelayMs,
         config.capacityRetryMaxDelayMs,
-        config.capacityRetryMaxAttempts,
+        {
+          capacityRetryMaxAttempts: config.capacityRetryMaxAttempts,
+          logger: config.logger,
+        },
       );
     case 'scaleway':
       return new ScalewayProvider(
