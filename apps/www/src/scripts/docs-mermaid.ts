@@ -13,7 +13,12 @@ const blocks = document.querySelectorAll<HTMLPreElement>(
 
 if (blocks.length > 0) {
   for (const [index, pre] of Array.from(blocks).entries()) {
-    const source = pre.textContent?.trim();
+    // Starlight's expressive-code renders each line as a <div class="ec-line">.
+    // textContent collapses them without newlines, which breaks Mermaid parsing.
+    const lines = pre.querySelectorAll('.ec-line');
+    const source = lines.length > 0
+      ? Array.from(lines).map((l) => l.textContent ?? '').join('\n').trim()
+      : pre.textContent?.trim();
     if (!source) continue;
 
     // Replace the entire expressive-code wrapper (or just the pre if no wrapper)
