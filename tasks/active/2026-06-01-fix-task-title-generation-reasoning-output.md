@@ -6,7 +6,8 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 
 ## Research Findings
 
-- `packages/shared/src/constants/ai-services.ts` sets `DEFAULT_TASK_TITLE_MODEL` to `@cf/google/gemma-4-26b-a4b-it`.
+- `packages/shared/src/constants/ai-services.ts` sets `DEFAULT_TASK_TITLE_MODEL`; this task changes it from `@cf/google/gemma-4-26b-a4b-it` to `@cf/zai-org/glm-4.7-flash`.
+- `packages/shared/src/constants/ai-services.ts` also owns `PLATFORM_AI_MODELS`; the new default should be present there so admin/model metadata surfaces do not reference an unregistered default.
 - `apps/api/src/services/task-title.ts` builds title-generation requests and falls back to `truncateTitle()` when `fetchWorkersAIChatCompletion()` returns null.
 - `apps/api/src/services/ai-proxy-shared.ts` sends OpenAI-compatible Workers AI chat completions through the shared Cloudflare AI Gateway and only extracts `choices[0].message.content`.
 - Production AI Gateway logs for `metadata.source = task-title` showed recent calls using `@cf/google/gemma-4-26b-a4b-it` returned HTTP 200, so this is not a model availability, rate-limit, or timeout problem.
@@ -16,12 +17,14 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 
 ## Checklist
 
-- [ ] Change task-title default model to `@cf/zai-org/glm-4.7-flash`.
-- [ ] Add a reusable way for utility Workers AI chat calls to pass reasoning controls.
-- [ ] Send thinking-disabled controls for task-title generation.
-- [ ] Update unit tests for the default model and outgoing gateway payload.
-- [ ] Update current configuration references for `TASK_TITLE_MODEL`.
-- [ ] Run targeted tests and repository quality checks.
+- [x] Change task-title default model to `@cf/zai-org/glm-4.7-flash`.
+- [x] Register GLM 4.7 Flash in the shared AI model registry.
+- [x] Add a reusable way for utility Workers AI chat calls to pass reasoning controls.
+- [x] Send thinking-disabled controls for task-title generation.
+- [x] Update unit tests for the default model and outgoing gateway payload.
+- [x] Update current configuration references for `TASK_TITLE_MODEL`.
+- [x] Add bug-fix process guidance for provider-compatible utility LLM payload controls.
+- [x] Run targeted tests and repository quality checks.
 - [ ] Deploy to staging through GitHub Actions and verify the changed behavior.
 - [ ] Open a PR, wait for green CI, merge, and verify production deployment.
 
@@ -29,6 +32,7 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 
 - Long task title generation no longer falls back solely because a reasoning model returns text outside `message.content`.
 - The default task-title utility model is current and not on Cloudflare's May 30, 2026 deprecation list.
+- The default task-title utility model is present in the shared AI model registry.
 - The title-generation request explicitly disables thinking/reasoning for models that support the controls.
 - Tests prove the gateway request includes the thinking-disabled parameters.
 - Staging and production verification show a new long task receives a concise generated title rather than the prompt prefix.
@@ -40,3 +44,12 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 - `packages/shared/src/constants/ai-services.ts`
 - `.claude/rules/32-cf-api-debugging.md`
 - `.claude/rules/33-staging-feature-validation.md`
+
+## Post-Mortem
+
+- **What broke**: Long task submissions often received fallback titles based on the prompt prefix even though task-title AI Gateway requests returned HTTP 200.
+- **Root cause**: The title utility assumed OpenAI-compatible chat responses would always put generated text in `choices[0].message.content`. Reasoning-capable Workers AI models can return `content = null` and place text in reasoning output unless request-level thinking is disabled.
+- **Timeline**: The behavior appeared after SAM moved task-title generation to current reasoning-capable Workers AI defaults. It was discovered when new tasks showed prompt-prefix titles and confirmed through production AI Gateway logs plus direct model probes.
+- **Why it was not caught**: Existing tests verified that SAM parsed normal `message.content` responses and fell back on empty output, but did not assert the provider-specific payload controls needed to keep the response contract stable for utility calls.
+- **Class of bug**: Provider-compatible API response-contract drift hidden behind a successful HTTP response.
+- **Process fix**: `.claude/rules/02-quality-gates.md` now requires regression tests for utility LLM calls to assert exact provider payload controls, including thinking/reasoning-disable parameters when needed.
