@@ -57,6 +57,14 @@ function setUrl(search: string) {
   window.history.replaceState({}, '', search);
 }
 
+// Leave all three status fetches pending so first-paint state can be asserted
+// synchronously, before `loading` ever clears.
+function hangStatusFetches() {
+  mocks.listCredentials.mockReturnValue(new Promise(() => {}));
+  mocks.listGitHubInstallations.mockReturnValue(new Promise(() => {}));
+  mocks.listAgentCredentials.mockReturnValue(new Promise(() => {}));
+}
+
 describe('OnboardingProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -128,5 +136,31 @@ describe('OnboardingProvider', () => {
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
     expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+  });
+
+  it('shows the overlay immediately when forced via ?onboarding, before the status fetch resolves', () => {
+    // Regression: the overlay used to be gated on `!loading`, so it only
+    // appeared after listCredentials/listGitHubInstallations/listAgentCredentials
+    // all settled (~5-6s). Keep the fetch pending and assert the overlay is
+    // already open on the first paint while `loading` is still in progress.
+    hangStatusFetches();
+    setUrl('/?onboarding');
+    renderProvider();
+    // No `await` — assert synchronously on the initial render.
+    expect(screen.getByTestId('loading')).toHaveTextContent('loading');
+    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+  });
+
+  it('does NOT flash the overlay on first paint when not forced (no ?onboarding)', () => {
+    // No-flash guarantee: without `?onboarding`, `overlayOpen` initializes to
+    // false, so the overlay must be closed on the very first paint — before the
+    // status fetch resolves. This holds for already-complete users too, since
+    // the auto-show signal only ever fires from the background fetch.
+    hangStatusFetches();
+    setUrl('/');
+    renderProvider();
+    // No `await` — assert synchronously on the initial render.
+    expect(screen.getByTestId('loading')).toHaveTextContent('loading');
+    expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
   });
 });
