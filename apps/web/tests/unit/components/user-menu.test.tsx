@@ -22,12 +22,15 @@ vi.mock('../../../src/lib/auth', () => ({
 }));
 
 import { UserMenu } from '../../../src/components/UserMenu';
+import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 
 function renderUserMenu() {
   return render(
-    <MemoryRouter>
-      <UserMenu />
-    </MemoryRouter>
+    <ThemeProvider>
+      <MemoryRouter>
+        <UserMenu />
+      </MemoryRouter>
+    </ThemeProvider>
   );
 }
 
@@ -65,6 +68,23 @@ describe('UserMenu', () => {
     fireEvent.click(screen.getByText('Dev User'));
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('toggles the theme when the theme button in the dropdown is clicked', () => {
+    document.documentElement.removeAttribute('data-ui-theme');
+    localStorage.clear();
+    renderUserMenu();
+    fireEvent.click(screen.getByText('Dev User'));
+
+    // Defaults to dark → button offers to switch to light.
+    const toggle = screen.getByRole('button', { name: 'Switch to light theme' });
+    expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam');
+
+    fireEvent.click(toggle);
+
+    expect(document.documentElement.getAttribute('data-ui-theme')).toBe('sam-light');
+    expect(localStorage.getItem('sam-theme')).toBe('light');
+    expect(screen.getByRole('button', { name: 'Switch to dark theme' })).toBeInTheDocument();
   });
 
   it('does not render navigation links (moved to AppShell)', () => {
