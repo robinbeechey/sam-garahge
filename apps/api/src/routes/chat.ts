@@ -27,6 +27,7 @@ import * as chatPersistence from '../services/chat-persistence';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
+import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
@@ -426,56 +427,13 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     throw errors.badRequest('content is required');
   }
 
-  // Find the workspace linked to this chat session, joining with nodes
-  // to verify the node is still active. When a node is destroyed (e.g.,
-  // after task timeout), its DNS record is cleaned up but the workspace
-  // may still be marked as 'running' in D1. Without this check, the
-  // request to the VM agent would hit the wildcard DNS record and loop
-  // back to this Worker, producing a confusing 404.
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
-    .where(
-      and(
-        eq(schema.workspaces.chatSessionId, sessionId),
-        inArray(schema.workspaces.status, ['running', 'recovery'])
-      )
-    )
-    .limit(1);
-
-  if (!workspace || !workspace.nodeId) {
-    throw errors.notFound('No active workspace found for this session');
-  }
-
-  // Verify the node is still reachable — prevents requests to destroyed VMs
-  // whose DNS records no longer exist (would loop back via wildcard DNS).
-  // D1 nodes.status uses 'running' for healthy nodes (not 'active'/'warm', which are DO states).
-  if (workspace.nodeStatus !== 'running') {
-    throw errors.conflict(
-      'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
-    );
-  }
-
-  // Find the running agent session on that workspace
-  const [agentSession] = await db
-    .select({ id: schema.agentSessions.id })
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.status, 'running')
-      )
-    )
-    .limit(1);
-
-  if (!agentSession) {
-    throw errors.notFound('No running agent session found');
-  }
+  // Resolve the live workspace + running agent session, tenant-scoped and
+  // fail-fast (see resolveLiveAgentSessionForChat).
+  const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
+    projectId,
+    sessionId,
+    userId,
+  });
 
   // Enrich @mentions with agent profile context before forwarding.
   // The enriched message goes to the agent; the clean message was already
@@ -511,50 +469,13 @@ chatRoutes.post('/:sessionId/cancel', async (c) => {
 
   await requireOwnedProject(db, projectId, userId);
 
-  // Find the workspace linked to this chat session with active node
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
-    .where(
-      and(
-        eq(schema.workspaces.chatSessionId, sessionId),
-        inArray(schema.workspaces.status, ['running', 'recovery'])
-      )
-    )
-    .limit(1);
-
-  if (!workspace || !workspace.nodeId) {
-    throw errors.notFound('No active workspace found for this session');
-  }
-
-  if (workspace.nodeStatus !== 'running') {
-    throw errors.conflict(
-      'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
-    );
-  }
-
-  // Find the running agent session on that workspace, scoped to the user
-  // for defence-in-depth (uses idx_agent_sessions_ws_user_status composite index)
-  const [agentSession] = await db
-    .select({ id: schema.agentSessions.id })
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.userId, userId),
-        eq(schema.agentSessions.status, 'running')
-      )
-    )
-    .limit(1);
-
-  if (!agentSession) {
-    throw errors.notFound('No running agent session found');
-  }
+  // Resolve the live workspace + running agent session, tenant-scoped and
+  // fail-fast (see resolveLiveAgentSessionForChat).
+  const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
+    projectId,
+    sessionId,
+    userId,
+  });
 
   // Forward the cancel to the VM agent
   const { cancelAgentSessionOnNode } = await import('../services/node-agent');
