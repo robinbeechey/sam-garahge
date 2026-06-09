@@ -96,7 +96,10 @@ export interface ProjectDetail extends Project {
 }
 
 export interface ProjectDetailResponse extends Project {
-  summary: Omit<ProjectSummary, 'id' | 'name' | 'repository' | 'githubRepoId' | 'defaultBranch' | 'status' | 'createdAt'>;
+  summary: Omit<
+    ProjectSummary,
+    'id' | 'name' | 'repository' | 'githubRepoId' | 'defaultBranch' | 'status' | 'createdAt'
+  >;
 }
 
 export interface CreateProjectRequest {
@@ -178,6 +181,81 @@ export interface ProjectRuntimeConfigResponse {
 export interface ListProjectsResponse {
   projects: Project[];
   nextCursor?: string | null;
+}
+
+// =============================================================================
+// Project Repository Access (same-org additional repos for submodule support)
+// =============================================================================
+
+/** Status of an additional repository in a project's repository-access set.
+ *  - `active`: user∩app access verified at last check.
+ *  - `access-revoked`: repo no longer accessible through the installation.
+ *  - `app-not-installed`: the GitHub App is no longer installed on the repo's owner.
+ *  - `unsupported-url`: a discovered submodule URL could not be parsed as a GitHub repo. */
+export type ProjectRepositoryStatus =
+  | 'active'
+  | 'access-revoked'
+  | 'app-not-installed'
+  | 'unsupported-url';
+
+/** An additional repository granted to a project's workspace tokens.
+ *  The primary project repository is always included implicitly and is not
+ *  represented as one of these rows. */
+export interface ProjectRepository {
+  id: string;
+  /** Full repository name, e.g. "octocat/hello-world". */
+  repository: string;
+  githubRepoId: number;
+  githubRepoNodeId: string | null;
+  status: ProjectRepositoryStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectRepositoryAccessResponse {
+  /** Always-included primary project repository (read-only, for display). */
+  primaryRepository: string;
+  /** Selected additional repositories. */
+  repositories: ProjectRepository[];
+}
+
+export interface AddProjectRepositoryRequest {
+  /** Full repository name, e.g. "octocat/hello-world". */
+  repository: string;
+}
+
+/** A repository suggested from the primary repo's `.gitmodules`, annotated with
+ *  whether it is accessible through the project's GitHub App installation. */
+export interface SubmoduleSuggestion {
+  /** Full repository name parsed from the submodule URL, e.g. "octocat/lib". */
+  repository: string;
+  /** Submodule path within the primary repo (from `.gitmodules`). */
+  path: string;
+  /** True when the repo is accessible through the installation (can be added). */
+  accessible: boolean;
+  /** True when this repo is already in the project's repository-access set. */
+  alreadyAdded: boolean;
+}
+
+export interface SubmoduleDiscoveryResponse {
+  suggestions: SubmoduleSuggestion[];
+}
+
+/** A repository the user can grant to the project, drawn from the live
+ *  user∩app installation intersection. Excludes the primary repository and
+ *  repositories already added to the project's repository-access set. */
+export interface AvailableRepository {
+  /** Full repository name, e.g. "octocat/hello-world". */
+  repository: string;
+  githubRepoId: number;
+  githubRepoNodeId: string | null;
+  /** Whether the repository is private (for display). */
+  private: boolean;
+}
+
+export interface AvailableRepositoriesResponse {
+  /** Repositories selectable for this project, sorted by full name. */
+  repositories: AvailableRepository[];
 }
 
 /** Configurable defaults for Artifacts-backed projects (Constitution Principle XI). */

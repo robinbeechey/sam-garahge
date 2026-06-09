@@ -5,6 +5,7 @@ import {
   getAuthenticatedUserOrganizations,
   getUserAccessibleInstallations,
   getUserInstallationRepositories,
+  parseGitmodules,
   verifyUserInstallationAccess,
   verifyWebhookSignature,
 } from '../../../src/services/github-app';
@@ -458,5 +459,88 @@ describe('verifyWebhookSignature', () => {
   it('rejects a malformed (non-hex / wrong-length) digest without throwing', async () => {
     await expect(verifyWebhookSignature(payload, 'sha256=not-hex', secret)).resolves.toBe(false);
     await expect(verifyWebhookSignature(payload, 'sha256=abcd', secret)).resolves.toBe(false);
+  });
+});
+
+describe('parseGitmodules', () => {
+  it.each([
+    {
+      name: 'resolves https GitHub submodule URLs to lowercased owner/repo and strips .git',
+      url: 'https://github.com/Acme/Shared-Lib.git',
+      path: 'vendor/lib',
+      owner: 'acme',
+      expected: { path: 'vendor/lib', repository: 'acme/shared-lib' },
+    },
+    {
+      name: 'resolves scp-like ssh submodule URLs (git@github.com:owner/repo.git)',
+      url: 'git@github.com:Acme/Shared-Lib.git',
+      path: 'vendor/lib',
+      owner: 'acme',
+      expected: { path: 'vendor/lib', repository: 'acme/shared-lib' },
+    },
+    {
+      name: 'resolves relative submodule URLs against the parent owner',
+      url: '../sibling-repo.git',
+      path: 'sibling',
+      owner: 'Acme',
+      expected: { path: 'sibling', repository: 'acme/sibling-repo' },
+    },
+    {
+      name: 'returns repository: null for non-GitHub hosts (unsupported-url surface)',
+      url: 'https://gitlab.com/acme/external.git',
+      path: 'external',
+      owner: 'acme',
+      expected: { path: 'external', repository: null },
+    },
+    {
+      name: 'returns repository: null for a malformed URL',
+      url: 'not a url',
+      path: 'broken',
+      owner: 'acme',
+      expected: { path: 'broken', repository: null },
+    },
+  ])('$name', ({ url, path, owner, expected }) => {
+    const content = ['[submodule "entry"]', `\tpath = ${path}`, `\turl = ${url}`].join('\n');
+    expect(parseGitmodules(content, owner)).toEqual([expected]);
+  });
+
+  it('parses multiple submodule entries and preserves order', () => {
+    const content = [
+      '[submodule "a"]',
+      '\tpath = pkgs/a',
+      '\turl = https://github.com/acme/a.git',
+      '[submodule "b"]',
+      '\tpath = pkgs/b',
+      '\turl = git@github.com:acme/b.git',
+      '[submodule "c"]',
+      '\tpath = pkgs/c',
+      '\turl = ../c.git',
+    ].join('\n');
+
+    expect(parseGitmodules(content, 'acme')).toEqual([
+      { path: 'pkgs/a', repository: 'acme/a' },
+      { path: 'pkgs/b', repository: 'acme/b' },
+      { path: 'pkgs/c', repository: 'acme/c' },
+    ]);
+  });
+
+  it('skips entries missing a path or url', () => {
+    const content = [
+      '[submodule "no-url"]',
+      '\tpath = pkgs/no-url',
+      '[submodule "no-path"]',
+      '\turl = https://github.com/acme/no-path.git',
+      '[submodule "complete"]',
+      '\tpath = pkgs/complete',
+      '\turl = https://github.com/acme/complete.git',
+    ].join('\n');
+
+    expect(parseGitmodules(content, 'acme')).toEqual([
+      { path: 'pkgs/complete', repository: 'acme/complete' },
+    ]);
+  });
+
+  it('returns an empty array for empty content', () => {
+    expect(parseGitmodules('', 'acme')).toEqual([]);
   });
 });

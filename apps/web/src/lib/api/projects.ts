@@ -1,10 +1,14 @@
 import type {
+  AddProjectRepositoryRequest,
+  AvailableRepositoriesResponse,
   CreateProjectRequest,
   DashboardActiveTasksResponse,
   ListProjectsResponse,
   Project,
   ProjectDetailResponse,
+  ProjectRepositoryAccessResponse,
   ProjectRuntimeConfigResponse,
+  SubmoduleDiscoveryResponse,
   UpdateProjectRequest,
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,
@@ -73,7 +77,9 @@ export interface AccountMapResponse {
   }>;
 }
 
-export async function getAccountMap(options?: { activeOnly?: boolean }): Promise<AccountMapResponse> {
+export async function getAccountMap(options?: {
+  activeOnly?: boolean;
+}): Promise<AccountMapResponse> {
   const params = new URLSearchParams();
   if (options?.activeOnly === false) {
     params.set('activeOnly', 'false');
@@ -179,6 +185,54 @@ export async function deleteProjectRuntimeFile(
     {
       method: 'DELETE',
     }
+  );
+}
+
+// =============================================================================
+// Repository Access (additional same-installation repos for workspace tokens)
+// =============================================================================
+
+export async function listProjectRepositories(
+  projectId: string
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(`/api/projects/${projectId}/repository-access`);
+}
+
+export async function addProjectRepository(
+  projectId: string,
+  data: AddProjectRepositoryRequest
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(`/api/projects/${projectId}/repository-access`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeProjectRepository(
+  projectId: string,
+  repoRowId: string
+): Promise<ProjectRepositoryAccessResponse> {
+  return request<ProjectRepositoryAccessResponse>(
+    `/api/projects/${projectId}/repository-access/${encodeURIComponent(repoRowId)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export async function discoverSubmoduleRepos(
+  projectId: string
+): Promise<SubmoduleDiscoveryResponse> {
+  return request<SubmoduleDiscoveryResponse>(
+    `/api/projects/${projectId}/repository-access/discover`
+  );
+}
+
+export async function listAvailableRepositories(
+  projectId: string
+): Promise<AvailableRepositoriesResponse> {
+  return request<AvailableRepositoriesResponse>(
+    `/api/projects/${projectId}/repository-access/available`
   );
 }
 
