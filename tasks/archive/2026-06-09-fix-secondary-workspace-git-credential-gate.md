@@ -99,29 +99,45 @@ backlog item.
 
 ## Implementation Checklist
 
-- [ ] Add `isKnownWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool`
-- [ ] Switch loopback branch of `isAuthorizedGitCredentialRequest` to use it
-- [ ] Delete `isPrimaryWorkspaceGitCredentialRequest`
-- [ ] Rewrite `TestHandleGitCredentialRejectsLocalExchangeForNonPrimaryWorkspace`
-      → registered secondary workspace loopback request now returns 200 and hits
+- [x] Add `isKnownWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool`
+- [x] Switch loopback branch of `isAuthorizedGitCredentialRequest` to use it
+- [x] Delete `isPrimaryWorkspaceGitCredentialRequest`
+- [x] Rewrite `TestHandleGitCredentialRejectsLocalExchangeForNonPrimaryWorkspace`
+      → now `TestHandleGitCredentialAllowsLocalExchangeForRegisteredSecondaryWorkspace`:
+      registered secondary workspace loopback request returns 200 and hits
       control plane with the secondary's callback token
-- [ ] Add test: loopback request for an UNREGISTERED workspace id → 401, control
-      plane NOT called
-- [ ] Add test: loopback request with empty workspaceId still maps to primary → 200
-- [ ] Run `go test ./...` in `packages/vm-agent`
-- [ ] Grep docs for any "primary workspace" git-credential references; sync if stale
+- [x] Add test: loopback request for an UNREGISTERED workspace id → 401, control
+      plane NOT called (`TestHandleGitCredentialRejectsLocalExchangeForUnregisteredWorkspace`)
+- [x] Add test: loopback request with empty workspaceId still maps to primary → 200
+      (covered by `TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer`)
+- [x] Run `go test ./...` in `packages/vm-agent` — all packages pass, vet clean
+- [x] Grep docs for any "primary workspace" git-credential references; none stale
+      (blog journal is a historical narrative, no gate claims)
 
 ## Acceptance Criteria
 
-- [ ] `isPrimaryWorkspaceGitCredentialRequest` no longer exists
-- [ ] Loopback credential auth authorizes ANY workspace registered on the node
+- [x] `isPrimaryWorkspaceGitCredentialRequest` no longer exists
+- [x] Loopback credential auth authorizes ANY workspace registered on the node
       (primary or secondary), rejects unregistered ones
-- [ ] Secondary-workspace git token refresh works (verified by test + staging)
-- [ ] `gh` CLI works on secondary workspaces (relies on same helper)
-- [ ] Same-org submodule clone still works (hard constraint)
-- [ ] Tokens remain per-workspace, single-repo, ~1h, owner-scoped
-- [ ] Tests cover secondary / unregistered / empty-workspaceId cases
-- [ ] Shipped to production
+- [x] Secondary-workspace git token refresh works (verified by test; staging pending Phase 6)
+- [x] `gh` CLI works on secondary workspaces (relies on same helper — same gate)
+- [x] Same-org submodule clone still works (bearer-token path unchanged)
+- [x] Tokens remain per-workspace, single-repo, ~1h, owner-scoped (control-plane exchange unchanged)
+- [x] Tests cover secondary / unregistered / empty-workspaceId cases
+- [ ] Shipped to production (pending Phase 6 staging + Phase 7 merge/deploy)
+
+## Phase 5 Review Outcomes (2026-06-09)
+
+- **task-completion-validator**: PASS. 1 LOW — file the deferred Option B backlog item.
+  Done: `tasks/backlog/2026-06-09-git-credential-loopback-container-binding.md`.
+- **go-specialist**: PASS, no blocking findings. 1 LOW suggestion to collapse the two
+  auth branches into a single `getWorkspaceRuntime` lookup. Intentionally NOT applied:
+  the explicit primary check is deliberate (keeps single-workspace host mode unchanged
+  when the runtime map is empty), per the Research Findings above.
+- **security-auditor**: PASS, 0 CRITICAL/HIGH. 1 MEDIUM (node-level callback-token
+  fallback for a workspace with an empty per-workspace token — pre-existing, not a
+  regression, bounded by control-plane ownership checks) + 2 LOW. Deferred to backlog
+  with justification: `tasks/backlog/2026-06-09-git-credential-node-token-fallback-hardening.md`.
 
 ## References
 
