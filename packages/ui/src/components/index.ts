@@ -13,4 +13,5 @@ export * from './Spinner';
 export * from './StatusBadge';
 export * from './Tabs';
 export * from './Toast';
+export * from './Timeline';
 export * from './Tooltip';
