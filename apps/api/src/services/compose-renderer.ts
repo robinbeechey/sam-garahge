@@ -10,6 +10,8 @@
 import type { DeploymentManifest, EnvValue } from '@simple-agent-manager/shared';
 import { stringify } from 'yaml';
 
+import { resolveVolumeMountRoot } from './deployment-volumes';
+
 // =============================================================================
 // Render context — caller supplies IDs and config
 // =============================================================================
@@ -17,7 +19,11 @@ import { stringify } from 'yaml';
 export interface ComposeRenderContext {
   environmentId: string;
   releaseId: string;
-  /** Base path for named volume mounts on the host. Default: /mnt/data/volumes */
+  /**
+   * Explicit base path for named volume mounts on the host.
+   * When omitted, derived from environmentId using the provider
+   * mount path template: /mnt/sam-env-{environmentId}/volumes
+   */
   volumeRoot?: string;
   /** Default memory limit (MB) when manifest omits resources. Default: 256 */
   defaultMemoryLimitMb?: number;
@@ -29,7 +35,6 @@ export interface ComposeRenderContext {
   resolvedSecrets?: Record<string, string>;
 }
 
-const DEFAULT_VOLUME_ROOT = '/mnt/data/volumes';
 const DEFAULT_MEMORY_LIMIT_MB = 256;
 
 // =============================================================================
@@ -163,7 +168,7 @@ function buildService(
 
 export function renderCompose(manifest: DeploymentManifest, ctx: ComposeRenderContext): string {
   const buildCtx: ServiceBuildContext = {
-    volumeRoot: ctx.volumeRoot ?? DEFAULT_VOLUME_ROOT,
+    volumeRoot: ctx.volumeRoot ?? resolveVolumeMountRoot(ctx.environmentId),
     defaultMemMb: ctx.defaultMemoryLimitMb ?? DEFAULT_MEMORY_LIMIT_MB,
     resolvedSecrets: ctx.resolvedSecrets ?? {},
     environmentId: ctx.environmentId,
