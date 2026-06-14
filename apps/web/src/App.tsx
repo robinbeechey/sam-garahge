@@ -50,6 +50,7 @@ import { SettingsAgents } from './pages/SettingsAgents';
 import { SettingsApiTokens } from './pages/SettingsApiTokens';
 import { SettingsCloudProvider } from './pages/SettingsCloudProvider';
 import { SettingsComputeUsage } from './pages/SettingsComputeUsage';
+import { SettingsCredentials } from './pages/SettingsCredentials';
 import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
 import { TaskDetail } from './pages/TaskDetail';
@@ -138,6 +139,7 @@ export default function App() {
                     <Route path="notifications" element={<SettingsNotifications />} />
                     <Route path="usage" element={<SettingsComputeUsage />} />
                     <Route path="api-tokens" element={<SettingsApiTokens />} />
+                    <Route path="credentials" element={<SettingsCredentials />} />
                   </Route>
                   <Route path="/account-map" element={<AccountMap />} />
                   <Route path="/tools" element={<Tools />} />

@@ -106,6 +106,25 @@ export { getCurrentUser } from './auth';
 export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';
 export type {
+  CCAttachmentListItem,
+  CCConfigurationListItem,
+  CCCredentialListItem,
+} from './composable-credentials';
+export {
+  createCCAttachment,
+  createCCConfiguration,
+  createCCCredential,
+  deleteCCAttachment,
+  deleteCCConfiguration,
+  deleteCCCredential,
+  listCCAttachments,
+  listCCConfigurations,
+  listCCCredentials,
+  updateCCAttachment,
+  updateCCConfiguration,
+  updateCCCredential,
+} from './composable-credentials';
+export type {
   CredentialValidationResponse,
   GcpProject,
   GcpSetupRequest,
