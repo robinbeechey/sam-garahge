@@ -117,24 +117,37 @@ func serveRecoveryACP(t *testing.T, reader *io.PipeReader, writer *io.PipeWriter
 	}()
 }
 
-func TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce(t *testing.T) {
-	host := newRecoveryTestHost(t, 2*time.Second)
-	defer host.Stop()
+// assertSuccessfulRecoveryReportsRecovered drives a mid-prompt peer disconnect
+// through the successful-restart branch of monitorProcessExit and asserts the
+// agent-agnostic contract: exactly one LoadSession restart, exactly one stop of
+// the old process, and a single "recovered" completion (never a terminal
+// error). The host's watchdog must be long enough that the only completion path
+// is the successful restart. Shared by the claude-code and openai-codex cases
+// so neither test reimplements the assertion block.
+func assertSuccessfulRecoveryReportsRecovered(t *testing.T, host *SessionHost, agentType, timeoutMsg string) {
+	t.Helper()
 
-	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, true)
+	oldProc, _, _ := armRecoverablePrompt(t, host, agentType, 10*time.Second, true)
 
 	var startCount atomic.Int32
-	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", countingSpawn(t, &startCount))
+	completed := startRecoveryMonitor(t, host, oldProc, agentType, countingSpawn(t, &startCount))
 	finishWithPeerDisconnect(host)
 
-	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, "timed out waiting for recovery completion")
+	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, timeoutMsg)
 	assertNoSecondCompletion(t, completed)
 	if oldProc.stopCount.Load() != 1 {
 		t.Fatalf("Stop count = %d, want 1", oldProc.stopCount.Load())
 	}
 	if startCount.Load() != 1 {
-		t.Fatalf("restart count = %d, want 1", startCount.Load())
+		t.Fatalf("restart count = %d, want 1 (LoadSession restart must run and report recovered)", startCount.Load())
 	}
+}
+
+func TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce(t *testing.T) {
+	host := newRecoveryTestHost(t, 2*time.Second)
+	defer host.Stop()
+
+	assertSuccessfulRecoveryReportsRecovered(t, host, "claude-code", "timed out waiting for recovery completion")
 }
 
 func TestSessionHost_UnkillableProcessWatchdogSignalsError(t *testing.T) {
@@ -290,27 +303,22 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 	expectCompletion(t, completed, "end_turn", time.Second, "normal prompt completion was swallowed by recovery once")
 }
 
-// TestSessionHost_CodexCrashRecovery_ReportsTerminalError proves the Codex
-// conservatism invariant (resumeShouldReportTerminalErrorLocked): even when the
-// LoadSession-based restart succeeds, Codex recovery is routed to a terminal
-// "error" rather than "recovered" until resume coherence is validated. The long
-// watchdog isolates this from the watchdog path so the only way to reach "error"
-// is through the successful-restart branch of monitorProcessExit.
-func TestSessionHost_CodexCrashRecovery_ReportsTerminalError(t *testing.T) {
+// TestSessionHost_CodexCrashRecovery_ReportsRecovered proves that a successful
+// LoadSession-based restart of an openai-codex agent is reported as "recovered"
+// — identical to claude-code (TestSessionHost_HungDisconnectStopsProcessAndSignalsOnce).
+// The resumed ACP session reuses the same session ID and conversation state, so
+// the task continues with awaiting_followup rather than being marked failed. The
+// long watchdog isolates this from the watchdog path so the only way to reach a
+// completion signal is through the successful-restart branch of monitorProcessExit.
+//
+// Regression guard: this previously reported a terminal "error" via the
+// resumeShouldReportTerminalErrorLocked codex guard, which converted every
+// successful codex mid-prompt disconnect recovery into a false task failure.
+func TestSessionHost_CodexCrashRecovery_ReportsRecovered(t *testing.T) {
 	host := newRecoveryTestHost(t, 30*time.Second)
 	defer host.Stop()
 
-	oldProc, _, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, true)
-
-	var startCount atomic.Int32
-	completed := startRecoveryMonitor(t, host, oldProc, "openai-codex", countingSpawn(t, &startCount))
-	finishWithPeerDisconnect(host)
-
-	expectCompletion(t, completed, "error", 2*time.Second, "codex recovery did not report terminal error")
-	assertNoSecondCompletion(t, completed)
-	if startCount.Load() != 1 {
-		t.Fatalf("restart count = %d, want 1 (LoadSession restart must run before the terminal error)", startCount.Load())
-	}
+	assertSuccessfulRecoveryReportsRecovered(t, host, "openai-codex", "codex recovery did not report recovered")
 }
 
 // TestSessionHost_CrashRecovery_MaxRestartExhausted proves that exceeding the
