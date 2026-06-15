@@ -168,3 +168,24 @@ export interface ResolvedEnvironment {
   credential: Credential | null;
   source: ResolutionSource;
 }
+
+// =============================================================================
+// Resolution status — read-only view of how each consumer currently resolves
+// =============================================================================
+
+/** Per-consumer resolution status for the connections overview. */
+export interface ConsumerResolutionStatus {
+  consumerId: string;
+  consumerKind: ConsumerKind;
+  consumerName: string;
+  source: ResolutionSource | 'halted' | 'unresolved';
+  /** User-chosen credential name, null when resolved from platform or unresolved. */
+  credentialName: string | null;
+  /** Rule 28: inactive project override halts the cascade. */
+  halted: boolean;
+}
+
+/** Response from GET /api/credentials/resolution-status. */
+export interface ResolutionStatusResponse {
+  consumers: ConsumerResolutionStatus[];
+}

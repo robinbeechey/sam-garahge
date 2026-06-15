@@ -117,6 +117,7 @@ export {
   deleteCCAttachment,
   deleteCCConfiguration,
   deleteCCCredential,
+  getResolutionStatus,
   listCCAttachments,
   listCCConfigurations,
   listCCCredentials,
