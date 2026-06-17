@@ -457,8 +457,8 @@ importers:
         specifier: 4.19.2
         version: 4.19.2(typescript@5.9.3)
       '@pulumi/tls':
-        specifier: 5.3.1
-        version: 5.3.1(typescript@5.9.3)
+        specifier: 5.5.0
+        version: 5.5.0(typescript@5.9.3)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2958,8 +2958,8 @@ packages:
   '@pulumi/random@4.19.2':
     resolution: {integrity: sha512-ee77eUIfPMekYi9x7/3iDVIhqUcZrvXQpC8YNTRN8XKfRDuuWio4xu2CvoHeEBDOov84FumMafFqn+xSf+XlDQ==}
 
-  '@pulumi/tls@5.3.1':
-    resolution: {integrity: sha512-cirkgzVjCCWabKALHw3QCW67UCFkcEhdTqJIuniivbOyuk2jitLCHfLOcyGh/QoS0p5cC+eRMlNZ+Z1+gu/p+Q==}
+  '@pulumi/tls@5.5.0':
+    resolution: {integrity: sha512-OTGxp4sgDEuXlXrd7NtxrhhciPgcn9rqDIZlGOTmTaeGo+tlVMwv73FFqiVrzAmBiILdU8tLXHfxhjc+bTLdrQ==}
 
   '@reduxjs/toolkit@2.11.2':
     resolution: {integrity: sha512-Kd6kAHTA6/nUpp8mySPqj3en3dm0tdMIgbttnQ1xFMVpufoj+ADi8pXLBsd4xzTRHQa7t/Jv8W5UnCuW4kuWMQ==}
@@ -4191,6 +4191,11 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
+  acorn@8.17.0:
+    resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
+
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
@@ -4319,8 +4324,8 @@ packages:
   ast-v8-to-istanbul@1.0.2:
     resolution: {integrity: sha512-dKmJxJsGItLmc5CYZKuEjuG6GnBs6PG4gohMhyFOWKaNQoYCuRZJDECaBlHmcG0lv2wc2E0uU8lESmBEumC3DQ==}
 
-  ast-v8-to-istanbul@1.0.3:
-    resolution: {integrity: sha512-jCMQ6ZylLPudp0CDfBmQBZUsrh1/8psbmu9ibeVWKuHWD0YrH9YABwlKu5kVEFoT0GCQQW9Z/SxfuEbbkGQCRg==}
+  ast-v8-to-istanbul@1.0.4:
+    resolution: {integrity: sha512-0bC0/4bTSrnwdhU3IsZDwEdojvuPrSg59OYZfKsLRtJZ0u8VBx9DebfqqG8bRdCC0I7vjgxmPi41P0lpkhJHtA==}
 
   astring@1.9.0:
     resolution: {integrity: sha512-LElXdjswlqjWrPpJFg1Fx4wpkOCxj1TDHlSV4PlaRxHGWko024xICaa97ZkMfs6DRKlCguiAI+rbXv5GWwXIkg==}
@@ -7176,8 +7181,8 @@ packages:
   obug@2.1.1:
     resolution: {integrity: sha512-uTqF9MuPraAQ+IsnPf366RG4cP9RtUi7MLO1N3KEc+wb0a6yKpeL0lmk2IB1jY5KHPAlTc6T/JRdC/YqxHNwkQ==}
 
-  obug@2.1.2:
-    resolution: {integrity: sha512-AWGB9WFcRXOQs48Z/udjI5ZcZMHXwX8XPByNpOydgcGsDLIzjGizhoMWJyKAWze7AVW/2W1i+/gPX4YtKe5cyg==}
+  obug@2.1.3:
+    resolution: {integrity: sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg==}
     engines: {node: '>=12.20.0'}
 
   ofetch@1.5.1:
@@ -11304,7 +11309,7 @@ snapshots:
       - ts-node
       - typescript
 
-  '@pulumi/tls@5.3.1(typescript@5.9.3)':
+  '@pulumi/tls@5.5.0(typescript@5.9.3)':
     dependencies:
       '@pulumi/pulumi': 3.217.1(typescript@5.9.3)
     transitivePeerDependencies:
@@ -12520,12 +12525,12 @@ snapshots:
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
       '@vitest/utils': 4.1.5
-      ast-v8-to-istanbul: 1.0.3
+      ast-v8-to-istanbul: 1.0.4
       istanbul-lib-coverage: 3.2.2
       istanbul-lib-report: 3.0.1
       istanbul-reports: 3.2.0
       magicast: 0.5.3
-      obug: 2.1.2
+      obug: 2.1.3
       std-env: 4.1.0
       tinyrainbow: 3.1.0
       vitest: 4.1.5(@opentelemetry/api@1.9.0)(@types/node@25.9.1)(@vitest/coverage-v8@4.1.5)(jsdom@29.1.1(@noble/hashes@2.0.1))(vite@6.4.1(@types/node@25.9.1)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.9.0))
@@ -12658,6 +12663,9 @@ snapshots:
   acorn@8.15.0: {}
 
   acorn@8.16.0: {}
+
+  acorn@8.17.0:
+    optional: true
 
   agent-base@7.1.4: {}
 
@@ -12810,7 +12818,7 @@ snapshots:
       estree-walker: 3.0.3
       js-tokens: 10.0.0
 
-  ast-v8-to-istanbul@1.0.3:
+  ast-v8-to-istanbul@1.0.4:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       estree-walker: 3.0.3
@@ -16427,7 +16435,7 @@ snapshots:
 
   obug@2.1.1: {}
 
-  obug@2.1.2:
+  obug@2.1.3:
     optional: true
 
   ofetch@1.5.1:
@@ -17742,7 +17750,7 @@ snapshots:
   terser@5.46.0:
     dependencies:
       '@jridgewell/source-map': 0.3.11
-      acorn: 8.16.0
+      acorn: 8.17.0
       commander: 2.20.3
       source-map-support: 0.5.21
     optional: true
