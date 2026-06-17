@@ -119,18 +119,18 @@ async function recordChatSessionLoadFailure(
 }
 
 function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
-  const configuredLimit = parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
+  const configuredLimit = Number.parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
   const maxLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
     ? configuredLimit
     : DEFAULT_CHAT_SESSION_MESSAGE_LIMIT;
-  const parsedLimit = parseInt(requestedLimit || '', 10);
+  const parsedLimit = Number.parseInt(requestedLimit || '', 10);
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : maxLimit;
   return Math.min(limit, maxLimit);
 }
 
 function getBeforeCursor(rawBefore?: string): number | null {
   if (!rawBefore) return null;
-  const before = parseInt(rawBefore, 10);
+  const before = Number.parseInt(rawBefore, 10);
   if (!Number.isFinite(before)) {
     throw errors.badRequest('before must be a valid timestamp');
   }
@@ -247,7 +247,7 @@ chatRoutes.get('/:sessionId', async (c) => {
 
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const beforeParam = c.req.query('before');
-  const before = beforeParam ? parseInt(beforeParam, 10) : null;
+  const before = beforeParam ? Number.parseInt(beforeParam, 10) : null;
 
   const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
   const compact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;

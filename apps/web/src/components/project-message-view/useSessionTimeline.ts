@@ -30,9 +30,8 @@ export function useSessionTimeline(
     try {
       const messagePages: ChatMessageResponse[][] = [];
       let before: number | undefined;
-      let hasMore = true;
 
-      while (hasMore) {
+      for (;;) {
         const result = await listChatMessages(projectId, sessionId, {
           before,
           roles: ['user'],
@@ -40,13 +39,13 @@ export function useSessionTimeline(
         });
 
         if (result.messages.length === 0) {
-          hasMore = false;
           break;
         }
 
         messagePages.unshift(result.messages);
         before = result.messages[0]?.createdAt;
-        hasMore = result.hasMore;
+
+        if (!result.hasMore) break;
       }
 
       setTimelineMessages(messagePages.flat());
@@ -75,7 +74,7 @@ export function useSessionTimeline(
   // Fetch server-backed timeline data when drawer opens
   useEffect(() => {
     if (!enabled) return;
-    void fetchTimeline();
+    fetchTimeline().catch(() => undefined);
   }, [enabled, fetchTimeline]);
 
   const messagesForTimeline = useMemo(

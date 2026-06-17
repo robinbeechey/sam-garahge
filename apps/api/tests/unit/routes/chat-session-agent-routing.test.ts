@@ -29,6 +29,37 @@ function makeProfileQuery(rows: unknown[]) {
   };
 }
 
+function makePersistedMessage(
+  id: string,
+  role: string,
+  content: string,
+  createdAt: number,
+  sequence: number,
+) {
+  return {
+    id,
+    sessionId: 'chat-1',
+    role,
+    content,
+    toolMetadata: null,
+    createdAt,
+    sequence,
+  };
+}
+
+function createChatRoutesTestApp(): Hono<{ Bindings: Env }> {
+  const app = new Hono<{ Bindings: Env }>();
+  app.onError((err, c) => {
+    const appError = err as { statusCode?: number; error?: string; message?: string };
+    if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
+      return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
+    }
+    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
+  });
+  app.route('/api/projects/:projectId/sessions', chatRoutes);
+  return app;
+}
+
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
@@ -130,29 +161,11 @@ describe('chatRoutes agent session routing', () => {
     });
 
     mocks.getMessages.mockResolvedValue({
-      messages: [
-        {
-          id: 'msg-1',
-          sessionId: 'chat-1',
-          role: 'assistant',
-          content: 'Persisted output',
-          toolMetadata: null,
-          createdAt: 1,
-          sequence: 1,
-        },
-      ],
+      messages: [makePersistedMessage('msg-1', 'assistant', 'Persisted output', 1, 1)],
       hasMore: false,
     });
 
-    app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c) => {
-      const appError = err as { statusCode?: number; error?: string; message?: string };
-      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
-      }
-      return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-    });
-    app.route('/api/projects/:projectId/sessions', chatRoutes);
+    app = createChatRoutesTestApp();
   });
 
   async function requestTaskEmbed(input: {
@@ -513,29 +526,11 @@ describe('chatRoutes message list', () => {
     });
 
     mocks.getMessages.mockResolvedValue({
-      messages: [
-        {
-          id: 'msg-user-1',
-          sessionId: 'chat-1',
-          role: 'user',
-          content: 'Initial prompt',
-          toolMetadata: null,
-          createdAt: 1000,
-          sequence: 1,
-        },
-      ],
+      messages: [makePersistedMessage('msg-user-1', 'user', 'Initial prompt', 1000, 1)],
       hasMore: false,
     });
 
-    app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c) => {
-      const appError = err as { statusCode?: number; error?: string; message?: string };
-      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
-      }
-      return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-    });
-    app.route('/api/projects/:projectId/sessions', chatRoutes);
+    app = createChatRoutesTestApp();
   });
 
   it('returns role-filtered persisted messages for a session', async () => {
