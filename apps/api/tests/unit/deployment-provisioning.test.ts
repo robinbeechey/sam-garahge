@@ -24,8 +24,23 @@ vi.mock('../../src/lib/logger', () => ({
   serializeError: vi.fn((e: unknown) => ({ error: String(e) })),
 }));
 
+// Structurally mock the drizzle SQL operators so we can assert WHERE-clause
+// *content* (which column, which value) rather than just "a WHERE exists".
+// Safe because all SQL execution is mocked in this test — the operator return
+// values are never handed to a real query engine.
+vi.mock('drizzle-orm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('drizzle-orm')>();
+  return {
+    ...actual,
+    eq: vi.fn((col: unknown, val: unknown) => ({ op: 'eq', col, val })),
+    isNull: vi.fn((col: unknown) => ({ op: 'isNull', col })),
+    and: vi.fn((...conds: unknown[]) => ({ op: 'and', conds })),
+  };
+});
+
 import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../../src/db/schema';
 import { DEPLOYMENT_DEFAULT_VM_SIZE, provisionDeploymentNode } from '../../src/services/deployment-provisioning';
 import { createNodeRecord, provisionNode } from '../../src/services/nodes';
 
@@ -73,7 +88,7 @@ function createMockDb(options: {
         }),
       };
     }),
-    update: vi.fn().mockReturnValue({
+    update: vi.fn().mockImplementation(() => ({
       set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
         tracker.updateSetValues.push(values);
         return {
@@ -83,7 +98,7 @@ function createMockDb(options: {
           }),
         };
       }),
-    }),
+    })),
     _tracker: tracker,
   };
 
@@ -249,6 +264,126 @@ describe('provisionDeploymentNode', () => {
     expect(result).not.toBeNull();
     // The provisioning promise should not throw — it has a .catch()
     await expect(result!.provisioningPromise).resolves.toBeUndefined();
+  });
+
+  it('rolls back nodeId to NULL when provisioning fails (Gap 7)', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-rollback-1' }));
+    vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
+
+    const result = await provisionDeploymentNode(
+      'env-rollback',
+      'proj-1',
+      'user-1',
+      createMockEnv(),
+    );
+
+    expect(result).not.toBeNull();
+
+    // Wait for the provisioning promise (catch handler runs the rollback)
+    await result!.provisioningPromise;
+
+    // There should be 2 update calls:
+    // 1. Initial link: set nodeId = 'node-rollback-1'
+    // 2. Rollback: set nodeId = null
+    expect(mockDb._tracker.updateSetValues).toHaveLength(2);
+
+    // First update sets nodeId to the new node
+    expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', 'node-rollback-1');
+
+    // Second update rolls back nodeId to null
+    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
+    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('updatedAt');
+
+    // Both updates must have WHERE clauses (tracked via updateWhereArgs)
+    expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
+
+    // ---- WHERE-clause CONTENT assertions (T4: nodeId-scoped, not just "exists") ----
+
+    // Initial link WHERE: and(eq(id, envId), isNull(nodeId)) — conditional link
+    // only applies when the env is not already bound to a node.
+    const linkWhere = mockDb._tracker.updateWhereArgs[0]![0] as {
+      op: string;
+      conds: Array<{ op: string; col: unknown; val?: unknown }>;
+    };
+    expect(linkWhere.op).toBe('and');
+    expect(linkWhere.conds).toHaveLength(2);
+    const linkIdCond = linkWhere.conds.find((cond) => cond.op === 'eq')!;
+    expect(linkIdCond.col).toBe(schema.deploymentEnvironments.id);
+    expect(linkIdCond.val).toBe('env-rollback');
+    const linkNodeCond = linkWhere.conds.find((cond) => cond.op === 'isNull')!;
+    expect(linkNodeCond.col).toBe(schema.deploymentEnvironments.nodeId);
+
+    // Rollback WHERE: and(eq(id, envId), eq(nodeId, node.id)) — only clears the
+    // nodeId we set, never another concurrent writer's node binding.
+    const rollbackWhere = mockDb._tracker.updateWhereArgs[1]![0] as {
+      op: string;
+      conds: Array<{ op: string; col: unknown; val?: unknown }>;
+    };
+    expect(rollbackWhere.op).toBe('and');
+    expect(rollbackWhere.conds).toHaveLength(2);
+    const rollbackIdCond = rollbackWhere.conds.find(
+      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.id,
+    )!;
+    expect(rollbackIdCond.val).toBe('env-rollback');
+    const rollbackNodeCond = rollbackWhere.conds.find(
+      (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.nodeId,
+    )!;
+    expect(rollbackNodeCond.val).toBe('node-rollback-1');
+  });
+
+  it('rollback is robust even if the rollback update itself fails', async () => {
+    // Create a DB where the second update call throws
+    const tracker = { selectCalls: 0, updateSetValues: [] as Record<string, unknown>[], updateWhereArgs: [] as unknown[][] };
+    let updateCallCount = 0;
+    const mockDb = {
+      select: vi.fn().mockImplementation(() => {
+        tracker.selectCalls++;
+        return {
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ provider: 'hetzner' }]),
+            }),
+          }),
+        };
+      }),
+      update: vi.fn().mockImplementation(() => ({
+        set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+          updateCallCount++;
+          tracker.updateSetValues.push(values);
+          return {
+            where: vi.fn().mockImplementation(() => {
+              // Second update (rollback) throws
+              if (updateCallCount >= 2) return Promise.reject(new Error('DB write failed'));
+              return Promise.resolve();
+            }),
+          };
+        }),
+      })),
+      _tracker: tracker,
+    };
+
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-rollback-fail' }));
+    vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
+
+    const result = await provisionDeploymentNode(
+      'env-rollback-fail',
+      'proj-1',
+      'user-1',
+      createMockEnv(),
+    );
+
+    expect(result).not.toBeNull();
+
+    // The provisioning promise should still not throw, even if rollback fails
+    await expect(result!.provisioningPromise).resolves.toBeUndefined();
+
+    // Both updates were attempted
+    expect(tracker.updateSetValues).toHaveLength(2);
+    // The rollback was attempted (nodeId: null)
+    expect(tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
   });
 });
 
