@@ -60,6 +60,7 @@ This fails the quality bar for an agent harness that executes LLM-provided comma
 - Regression proof: temporarily reversed only the `packages/harness/tools/bash.go` implementation change and ran `go test ./tools -run TestBash_CleansSuccessfulBackgroundChild -count=1`; it failed with `background child pid ... is still alive after Bash.Execute returned`.
 - `go test -race ./tools -count=1` passed in `packages/harness`.
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed at the repo root. `pnpm lint` emitted existing warnings only.
+- PR CI initially failed the preflight-evidence job because the PR body was missing the required agent preflight marker block. The PR body was updated with bounded preflight evidence and this task record was amended to trigger a fresh pull request event for CI validation.
 
 ## Specialist Review Evidence
 
