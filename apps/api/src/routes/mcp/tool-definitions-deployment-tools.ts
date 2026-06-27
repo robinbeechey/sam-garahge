@@ -36,7 +36,8 @@ export const DEPLOYMENT_TOOLS = [
         },
         since: {
           type: 'string',
-          description: 'Optional lower time bound, as ISO 8601 or a VM-agent relative value like "-1h".',
+          description:
+            'Optional lower time bound, as ISO 8601 or a VM-agent relative value like "-1h".',
         },
         until: {
           type: 'string',
@@ -54,6 +55,43 @@ export const DEPLOYMENT_TOOLS = [
           type: 'number',
           description:
             'Optional max log entries to return. Clamped by MCP_DEPLOYMENT_LOG_MAX_LIMIT and the deployment node log reader.',
+        },
+      },
+      required: ['environment'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'preview_deployment_routes',
+    description:
+      'Preview SAM route classification and generated public URLs for a Docker Compose file without deploying it. Use this before publishing when app configuration needs public hosts/origins/callback URLs. Requires an accessible deployment environment because public URLs are derived from the environment id and base domain. Compose ports with mode: host are treated as internal/private; other ports are public unless an explicit private route suppresses them.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        environment: {
+          type: 'string',
+          description: 'Deployment environment name, such as "staging" or "production".',
+        },
+        composeYaml: {
+          type: 'string',
+          description:
+            'Docker Compose YAML to inspect. The tool returns public routes with URLs and internal routes without public DNS.',
+        },
+      },
+      required: ['environment', 'composeYaml'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_deployment_routes',
+    description:
+      'List generated public URLs, custom domains, and internal routes derived from the latest release version in an accessible deployment environment. Check latestRelease.status before assuming the routes are currently live. This is read-only and never returns the stored Compose file or secret values.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        environment: {
+          type: 'string',
+          description: 'Deployment environment name, such as "staging" or "production".',
         },
       },
       required: ['environment'],
@@ -93,7 +131,8 @@ export const DEPLOYMENT_TOOLS = [
         },
         value: {
           type: 'string',
-          description: 'Value to store. For secrets this value is write-only and will not be returned.',
+          description:
+            'Value to store. For secrets this value is write-only and will not be returned.',
         },
         isSecret: {
           type: 'boolean',
@@ -109,9 +148,10 @@ export const DEPLOYMENT_TOOLS = [
     description:
       'Get a comprehensive guide for deploying an app with SAM. ' +
       'Call this whenever a user asks to deploy, launch, publish, ship, or release an app. ' +
-      'Returns a briefing covering SAM\'s agent-first / never-through-CI deployment model, the ' +
-      'full tool-by-tool flow in order (list environments, set Variables/Secrets, build_and_publish, ' +
-      'read logs, check DNS), Variables vs Secrets semantics, Compose authoring, and common pitfalls.',
+      "Returns a briefing covering SAM's agent-first / never-through-CI deployment model, the " +
+      'full tool-by-tool flow in order (list environments, preview routes, set Variables/Secrets, ' +
+      'build_and_publish, poll publish status, list routes, read logs, check DNS), Variables vs ' +
+      'Secrets semantics, Compose authoring, and common pitfalls.',
     inputSchema: {
       type: 'object' as const,
       properties: {},

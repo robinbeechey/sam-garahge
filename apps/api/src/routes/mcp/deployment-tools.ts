@@ -1,4 +1,4 @@
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -17,6 +17,13 @@ import {
   loadDeploymentEnvironmentConfigRows,
   upsertDeploymentEnvironmentConfigVar,
 } from '../../services/deployment-environment-config';
+import {
+  buildComposePublishRouteDiscovery,
+  buildReleaseRouteDiscovery,
+  type DeploymentRouteDiscovery,
+  type DeploymentRoutePublicDiscovery,
+  type DeploymentRouteTargetOptions,
+} from '../../services/deployment-routing';
 import { getRuntimeLimits } from '../../services/limits';
 import { getNodeLogsFromNode } from '../../services/node-agent';
 import { byteLength, PROJECT_ENV_KEY_PATTERN } from '../projects/_helpers';
@@ -32,13 +39,36 @@ import {
 
 type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
 
+interface DeploymentRouteCustomDomainDiscovery {
+  id: string;
+  service: string;
+  containerPort: number;
+  routeIndex: number;
+  hostname: string;
+  url: string;
+  verificationStatus: string;
+  verificationError: string | null;
+  verifiedAt: string | null;
+  createdAt: string;
+  cnameTarget: string | null;
+  routeAvailable: boolean;
+  willBeIncludedInApplyPayload: boolean;
+}
+
+type DeploymentRoutePublicDiscoveryWithCustomDomains = DeploymentRoutePublicDiscovery & {
+  customDomains: DeploymentRouteCustomDomainDiscovery[];
+};
+
+type DeploymentRouteDiscoveryWithCustomDomains = Omit<DeploymentRouteDiscovery, 'publicRoutes'> & {
+  publicRoutes: DeploymentRoutePublicDiscoveryWithCustomDomains[];
+  customDomains: DeploymentRouteCustomDomainDiscovery[];
+};
+
 const DEFAULT_MCP_DEPLOYMENT_LOG_LIMIT = 200;
 const DEFAULT_MCP_DEPLOYMENT_LOG_MAX_LIMIT = 1000;
+const DEFAULT_MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES = 128_000;
 
-function jsonTextResult(
-  requestId: string | number | null,
-  payload: unknown
-): JsonRpcResponse {
+function jsonTextResult(requestId: string | number | null, payload: unknown): JsonRpcResponse {
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
   });
@@ -56,6 +86,100 @@ function getDeploymentLogLimits(env: Env): { defaultLimit: number; maxLimit: num
   return { defaultLimit, maxLimit };
 }
 
+function getComposePreviewMaxBytes(env: Env): number {
+  return parsePositiveInt(
+    env.MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES,
+    DEFAULT_MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES
+  );
+}
+
+function routeTargetOptions(env: Env, environmentId: string): DeploymentRouteTargetOptions {
+  return {
+    environmentId,
+    baseDomain: env.BASE_DOMAIN,
+    routePortBase: env.DEPLOYMENT_ROUTE_PORT_BASE,
+    routePortSpan: env.DEPLOYMENT_ROUTE_PORT_SPAN,
+  };
+}
+
+function emptyRouteDiscovery(env: Env, environmentId: string) {
+  return buildComposePublishRouteDiscovery(
+    { composeYaml: '' },
+    routeTargetOptions(env, environmentId)
+  );
+}
+
+function findPublicRoute(
+  routes: DeploymentRouteDiscovery,
+  service: string,
+  port: number
+): DeploymentRoutePublicDiscovery | null {
+  return (
+    routes.publicRoutes.find(
+      (route) => route.service === service && route.containerPort === port
+    ) ?? null
+  );
+}
+
+async function loadRouteCustomDomains(
+  db: DeploymentDb,
+  environmentId: string,
+  routes: DeploymentRouteDiscovery
+): Promise<DeploymentRouteCustomDomainDiscovery[]> {
+  const domains = await db
+    .select({
+      id: schema.deploymentCustomDomains.id,
+      service: schema.deploymentCustomDomains.service,
+      port: schema.deploymentCustomDomains.port,
+      routeIndex: schema.deploymentCustomDomains.routeIndex,
+      hostname: schema.deploymentCustomDomains.hostname,
+      verificationStatus: schema.deploymentCustomDomains.verificationStatus,
+      verificationError: schema.deploymentCustomDomains.verificationError,
+      verifiedAt: schema.deploymentCustomDomains.verifiedAt,
+      createdAt: schema.deploymentCustomDomains.createdAt,
+    })
+    .from(schema.deploymentCustomDomains)
+    .where(eq(schema.deploymentCustomDomains.environmentId, environmentId))
+    .orderBy(schema.deploymentCustomDomains.createdAt);
+
+  return domains.map((domain) => {
+    const parent = findPublicRoute(routes, domain.service, domain.port);
+    return {
+      id: domain.id,
+      service: domain.service,
+      containerPort: domain.port,
+      routeIndex: domain.routeIndex,
+      hostname: domain.hostname,
+      url: `https://${domain.hostname}`,
+      verificationStatus: domain.verificationStatus,
+      verificationError: domain.verificationError,
+      verifiedAt: domain.verifiedAt,
+      createdAt: domain.createdAt,
+      cnameTarget: parent?.hostname ?? null,
+      routeAvailable: parent !== null,
+      willBeIncludedInApplyPayload: domain.verificationStatus === 'verified' && parent !== null,
+    };
+  });
+}
+
+async function withCustomDomains(
+  db: DeploymentDb,
+  environmentId: string,
+  routes: DeploymentRouteDiscovery
+): Promise<DeploymentRouteDiscoveryWithCustomDomains> {
+  const customDomains = await loadRouteCustomDomains(db, environmentId, routes);
+  return {
+    ...routes,
+    publicRoutes: routes.publicRoutes.map((route) => ({
+      ...route,
+      customDomains: customDomains.filter(
+        (domain) => domain.service === route.service && domain.containerPort === route.containerPort
+      ),
+    })),
+    customDomains,
+  };
+}
+
 function trimmedString(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -71,7 +195,11 @@ function requireEnvironmentName(
   const environment = trimmedString(toolArgs.environment);
   if (!environment) {
     return {
-      response: jsonRpcError(requestId, INVALID_PARAMS, 'A deployment environment name is required.'),
+      response: jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'A deployment environment name is required.'
+      ),
     };
   }
   return { value: environment };
@@ -293,6 +421,105 @@ export async function handleReadDeploymentLogs(
       unavailableReason: 'node_agent_unreachable',
     });
   }
+}
+
+export async function handlePreviewDeploymentRoutes(
+  requestId: string | number | null,
+  toolArgs: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const db = drizzle(env.DATABASE, { schema });
+  const resolved = await resolveAccessibleEnvironment(requestId, db, tokenData, toolArgs);
+  if ('response' in resolved) return resolved.response;
+
+  if (typeof toolArgs.composeYaml !== 'string' || toolArgs.composeYaml.trim() === '') {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'composeYaml must be a non-empty string.');
+  }
+
+  const composeYaml = sanitizeUserInput(toolArgs.composeYaml);
+  const maxBytes = getComposePreviewMaxBytes(env);
+  if (byteLength(composeYaml) > maxBytes) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `composeYaml exceeds max size of ${maxBytes} bytes`
+    );
+  }
+
+  try {
+    const routes = buildComposePublishRouteDiscovery(
+      { composeYaml },
+      routeTargetOptions(env, resolved.environment.id)
+    );
+
+    return jsonTextResult(requestId, {
+      environment: summarizeEnvironment(resolved.environment, resolved.taskAgentProfileId),
+      routes,
+      instructions:
+        'Public routes get SAM-managed hostnames/URLs. Internal routes do not get public DNS and are reachable only within the deployed Compose stack/private network.',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonRpcError(requestId, INVALID_PARAMS, message);
+  }
+}
+
+export async function handleListDeploymentRoutes(
+  requestId: string | number | null,
+  toolArgs: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const db = drizzle(env.DATABASE, { schema });
+  const resolved = await resolveAccessibleEnvironment(requestId, db, tokenData, toolArgs);
+  if ('response' in resolved) return resolved.response;
+
+  const releases = await db
+    .select({
+      id: schema.deploymentReleases.id,
+      version: schema.deploymentReleases.version,
+      status: schema.deploymentReleases.status,
+      source: schema.deploymentReleases.source,
+      createdAt: schema.deploymentReleases.createdAt,
+      manifest: schema.deploymentReleases.manifest,
+    })
+    .from(schema.deploymentReleases)
+    .where(eq(schema.deploymentReleases.environmentId, resolved.environment.id))
+    .orderBy(desc(schema.deploymentReleases.version))
+    .limit(1);
+
+  const release = releases[0];
+  if (!release) {
+    const routes = emptyRouteDiscovery(env, resolved.environment.id);
+    return jsonTextResult(requestId, {
+      environment: summarizeEnvironment(resolved.environment, resolved.taskAgentProfileId),
+      latestRelease: null,
+      routes: await withCustomDomains(db, resolved.environment.id, routes),
+    });
+  }
+
+  const routes = buildReleaseRouteDiscovery(
+    release.manifest,
+    routeTargetOptions(env, resolved.environment.id)
+  );
+
+  const routeDiscovery = routes ?? {
+    ...emptyRouteDiscovery(env, resolved.environment.id),
+    unavailableReason: 'release_manifest_unreadable',
+  };
+
+  return jsonTextResult(requestId, {
+    environment: summarizeEnvironment(resolved.environment, resolved.taskAgentProfileId),
+    latestRelease: {
+      id: release.id,
+      version: release.version,
+      status: release.status,
+      source: release.source ?? 'build-on-node',
+      createdAt: release.createdAt,
+    },
+    routes: await withCustomDomains(db, resolved.environment.id, routeDiscovery),
+  });
 }
 
 export async function handleListDeploymentEnvironmentConfig(

@@ -21,7 +21,7 @@ import type { ComposeParseError, UnresolvedManifest } from './types';
 export function parseEnvironment(
   value: unknown,
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Record<string, string | { secret: string }> {
   if (value === undefined || value === null) return {};
 
@@ -77,7 +77,7 @@ export function parseEnvironment(
 function parseEnvironmentList(
   list: unknown[],
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Record<string, string | { secret: string }> {
   const env: Record<string, string | { secret: string }> = {};
 
@@ -111,7 +111,7 @@ function parseEnvironmentList(
 export function parseServiceVolumes(
   value: unknown,
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Array<{ name: string; mountPath: string }> {
   if (value === undefined || value === null) return [];
 
@@ -155,14 +155,15 @@ export function parseServiceVolumes(
 function parseShortVolume(
   spec: string,
   path: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): { name: string; mountPath: string } | null {
   // Check for Docker socket
   for (const socketPath of DOCKER_SOCKET_PATHS) {
     if (spec.includes(socketPath)) {
       errors.push({
         path,
-        message: 'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
+        message:
+          'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
       });
       return null;
     }
@@ -195,7 +196,7 @@ function parseShortVolume(
 function parseLongVolume(
   vol: Record<string, unknown>,
   path: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): { name: string; mountPath: string } | null {
   const type = vol['type'] as string | undefined;
   const source = vol['source'] as string | undefined;
@@ -206,7 +207,8 @@ function parseLongVolume(
     if (source === socketPath || target === socketPath) {
       errors.push({
         path,
-        message: 'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
+        message:
+          'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
       });
       return null;
     }
@@ -215,7 +217,8 @@ function parseLongVolume(
   if (type === 'bind') {
     errors.push({
       path,
-      message: 'Bind mounts (type: bind) are not allowed. Use named volumes (type: volume) instead.',
+      message:
+        'Bind mounts (type: bind) are not allowed. Use named volumes (type: volume) instead.',
     });
     return null;
   }
@@ -262,7 +265,7 @@ function parseLongVolume(
 
 export function parseVolumes(
   value: unknown,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Record<string, { sizeHintMb?: number }> {
   if (value === undefined || value === null) return {};
 
@@ -313,12 +316,18 @@ export function parseVolumes(
 // Routes parsing (from x-sam-routes)
 // =============================================================================
 
-export function parseRoutes(
+export interface ComposeRouteHint {
+  service: string;
+  port: number;
+  mode: 'public' | 'private';
+}
+
+export function parseComposeRouteHints(
   xSamRoutes: unknown,
   services: Record<string, unknown>,
-  errors: ComposeParseError[],
-): Array<{ service: string; port: number; mode: 'public' | 'private' }> {
-  const routes: Array<{ service: string; port: number; mode: 'public' | 'private' }> = [];
+  errors: ComposeParseError[]
+): ComposeRouteHint[] {
+  const routes: ComposeRouteHint[] = [];
 
   if (xSamRoutes !== undefined && xSamRoutes !== null) {
     if (!Array.isArray(xSamRoutes)) {
@@ -382,7 +391,8 @@ export function parseRoutes(
       const expose = svc['expose'];
       if (Array.isArray(expose)) {
         for (const item of expose) {
-          const port = typeof item === 'string' ? parseInt(item, 10) : typeof item === 'number' ? item : NaN;
+          const port =
+            typeof item === 'string' ? parseInt(item, 10) : typeof item === 'number' ? item : NaN;
           if (!isNaN(port) && port >= 1 && port <= 65535) {
             // Only add as hint if no explicit x-sam-routes entry for this service+port
             if (!routes.some((r) => r.service === serviceName && r.port === port)) {
@@ -398,11 +408,11 @@ export function parseRoutes(
       const ports = svc['ports'];
       if (Array.isArray(ports)) {
         for (const item of ports) {
-          const containerPort = extractContainerPort(item);
-          if (containerPort && containerPort >= 1 && containerPort <= 65535) {
+          const routeHint = extractPortRouteHint(item);
+          if (routeHint && routeHint.port >= 1 && routeHint.port <= 65535) {
             // Only add as hint if no explicit route for this service+port
-            if (!routes.some((r) => r.service === serviceName && r.port === containerPort)) {
-              routes.push({ service: serviceName, port: containerPort, mode: 'public' });
+            if (!routes.some((r) => r.service === serviceName && r.port === routeHint.port)) {
+              routes.push({ service: serviceName, port: routeHint.port, mode: routeHint.mode });
             }
           }
         }
@@ -413,8 +423,18 @@ export function parseRoutes(
   return routes;
 }
 
-export function extractContainerPort(portSpec: unknown): number | null {
-  if (typeof portSpec === 'number') return portSpec;
+export function parseRoutes(
+  xSamRoutes: unknown,
+  services: Record<string, unknown>,
+  errors: ComposeParseError[]
+): ComposeRouteHint[] {
+  return parseComposeRouteHints(xSamRoutes, services, errors);
+}
+
+export function extractPortRouteHint(
+  portSpec: unknown
+): { port: number; mode: 'public' | 'private' } | null {
+  if (typeof portSpec === 'number') return { port: portSpec, mode: 'public' };
 
   if (typeof portSpec === 'string') {
     // Formats: "80", "8080:80", "0.0.0.0:8080:80", "80/tcp"
@@ -422,18 +442,27 @@ export function extractContainerPort(portSpec: unknown): number | null {
     const parts = cleaned.split(':');
     const containerPart = parts[parts.length - 1]!;
     const port = parseInt(containerPart, 10);
-    return isNaN(port) ? null : port;
+    return isNaN(port) ? null : { port, mode: 'public' };
   }
 
   if (typeof portSpec === 'object' && portSpec !== null && !Array.isArray(portSpec)) {
-    // Long syntax: { target: 80, published: 8080 }
+    // Long syntax: { target: 80, published: 8080, mode: "host" | "ingress" }
     const obj = portSpec as Record<string, unknown>;
     const target = obj['target'];
-    if (typeof target === 'number') return target;
-    if (typeof target === 'string') return parseInt(target, 10) || null;
+    let port: number | null = null;
+    if (typeof target === 'number') port = target;
+    if (typeof target === 'string') port = parseInt(target, 10) || null;
+    if (port === null) return null;
+
+    const composeMode = typeof obj['mode'] === 'string' ? obj['mode'].toLowerCase() : '';
+    return { port, mode: composeMode === 'host' ? 'private' : 'public' };
   }
 
   return null;
+}
+
+export function extractContainerPort(portSpec: unknown): number | null {
+  return extractPortRouteHint(portSpec)?.port ?? null;
 }
 
 // =============================================================================
@@ -442,7 +471,7 @@ export function extractContainerPort(portSpec: unknown): number | null {
 
 export function parseHooks(
   xSamPreFlight: unknown,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): UnresolvedManifest['hooks'] | undefined {
   if (xSamPreFlight === undefined || xSamPreFlight === null) return undefined;
 
@@ -458,7 +487,8 @@ export function parseHooks(
 
   const service = hook['service'] as string | undefined;
   const command = hook['command'] as string[] | undefined;
-  const timeoutSeconds = (hook['timeoutSeconds'] as number | undefined) ?? DEFAULT_PRE_FLIGHT_TIMEOUT_SECONDS;
+  const timeoutSeconds =
+    (hook['timeoutSeconds'] as number | undefined) ?? DEFAULT_PRE_FLIGHT_TIMEOUT_SECONDS;
 
   if (!service || typeof service !== 'string') {
     errors.push({
@@ -476,7 +506,11 @@ export function parseHooks(
     return undefined;
   }
 
-  if (typeof timeoutSeconds !== 'number' || timeoutSeconds < 1 || timeoutSeconds > MAX_PRE_FLIGHT_TIMEOUT_SECONDS) {
+  if (
+    typeof timeoutSeconds !== 'number' ||
+    timeoutSeconds < 1 ||
+    timeoutSeconds > MAX_PRE_FLIGHT_TIMEOUT_SECONDS
+  ) {
     errors.push({
       path: 'x-sam-pre-flight.timeoutSeconds',
       message: 'Pre-flight hook timeoutSeconds must be between 1 and 3600.',
@@ -496,7 +530,7 @@ export function parseHooks(
 export function parseResources(
   deploy: unknown,
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): { memoryLimitMb: number; cpuLimit: number } | undefined {
   if (deploy === undefined || deploy === null) return undefined;
 
@@ -618,7 +652,7 @@ function parseMemoryString(value: unknown): number | null {
 export function parseHealthcheck(
   value: unknown,
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): { path: string; port: number; expectedStatus: number } | undefined {
   if (value === undefined || value === null) return undefined;
 
@@ -660,7 +694,7 @@ export function parseHealthcheck(
 }
 
 function extractHealthcheckFromTest(
-  test: string | string[],
+  test: string | string[]
 ): { path: string; port: number; expectedStatus: number } | undefined {
   const cmdStr = Array.isArray(test)
     ? test.filter((t) => t !== 'CMD' && t !== 'CMD-SHELL').join(' ')
