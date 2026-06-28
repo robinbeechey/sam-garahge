@@ -518,11 +518,13 @@
       params.set('public', 'false');
       params.append('callback_urls[]', apiUrl + '/api/auth/callback/github');
       params.set('setup_url', apiUrl + '/api/github/callback');
+      params.set('setup_on_update', 'true');
       params.set('webhook_active', 'true');
       params.set('webhook_url', apiUrl + '/api/github/webhook');
       params.set('contents', 'write');
       params.set('metadata', 'read');
       params.set('email_addresses', 'read');
+      params.set('pull_requests', 'read');
       params.append('events[]', 'push');
       params.append('events[]', 'pull_request');
 
@@ -620,8 +622,9 @@
         ['Homepage', appUrl],
         ['Callback', apiUrl + '/api/auth/callback/github'],
         ['Setup URL', apiUrl + '/api/github/callback'],
+        ['Redirect on update', 'Enabled'],
         ['Webhook', apiUrl + '/api/github/webhook'],
-        ['Permissions', 'Contents (write), Metadata (read), Email addresses (read)'],
+        ['Permissions', 'Contents (write), Metadata (read), Email addresses (read), Pull requests (read)'],
         ['Events', 'push, pull_request'],
       ];
 
@@ -642,8 +645,9 @@
       var hasAppId = credAppId.value.trim().length > 0;
       var hasClientId = credClientId.value.trim().length > 0;
       var hasClientSecret = credClientSecret.value.trim().length > 0;
+      var hasAppSlug = credAppSlug.value.trim().length > 0;
       var hasPrivateKey = credPrivateKey.value.trim().indexOf('-----BEGIN') !== -1;
-      btnGenerateSecrets.disabled = !(hasAppId && hasClientId && hasClientSecret && hasPrivateKey);
+      btnGenerateSecrets.disabled = !(hasAppId && hasClientId && hasClientSecret && hasAppSlug && hasPrivateKey);
     }
 
     [credAppId, credClientId, credClientSecret, credAppSlug, credPrivateKey].forEach(function(el) {
@@ -663,7 +667,7 @@
         ['GH_APP_ID', appId, appId],
         ['GH_CLIENT_ID', clientId, clientId],
         ['GH_CLIENT_SECRET', clientSecret, clientSecret],
-        ['GH_APP_SLUG', appSlug || '(not set)', appSlug],
+        ['GH_APP_SLUG', appSlug, appSlug],
         ['GH_APP_PRIVATE_KEY', privateKeyB64.length > 40 ? privateKeyB64.substring(0, 40) + '...' : privateKeyB64, privateKeyB64],
         ['GH_WEBHOOK_SECRET', webhookSecret, webhookSecret],
       ];
