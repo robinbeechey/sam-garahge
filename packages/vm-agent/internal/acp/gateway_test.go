@@ -1427,7 +1427,7 @@ func TestAuthFilePathValidation(t *testing.T) {
 func TestBuildOpencodeConfig_DefaultUsesOpenCodeZen(t *testing.T) {
 	t.Parallel()
 
-	config := buildOpencodeConfig(nil, nil)
+	config := buildOpencodeConfig(nil)
 
 	assertOpenCodeZenDefaultConfig(t, config)
 }
@@ -1437,7 +1437,7 @@ func TestBuildOpencodeConfig_UnknownProviderFallsBackToOpenCodeZen(t *testing.T)
 
 	config := buildOpencodeConfig(&agentSettingsPayload{
 		OpencodeProvider: "unknown-provider",
-	}, nil)
+	})
 
 	assertOpenCodeZenDefaultConfig(t, config)
 }
@@ -1470,7 +1470,7 @@ func TestBuildOpencodeConfig_OpenCodeZenUsesBuiltInModelPrefixes(t *testing.T) {
 			config := buildOpencodeConfig(&agentSettingsPayload{
 				OpencodeProvider: "opencode-zen",
 				Model:            tt.model,
-			}, nil)
+			})
 
 			if got := config["model"]; got != tt.model {
 				t.Fatalf("model = %v, want %q", got, tt.model)
@@ -1487,7 +1487,7 @@ func TestBuildOpencodeConfig_OpenCodeGoDefaultsToGLM52(t *testing.T) {
 
 	config := buildOpencodeConfig(&agentSettingsPayload{
 		OpencodeProvider: "opencode-go",
-	}, nil)
+	})
 
 	if got := config["model"]; got != DefaultOpencodeGoModel {
 		t.Fatalf("model = %v, want %q", got, DefaultOpencodeGoModel)
@@ -1504,12 +1504,60 @@ func TestBuildOpencodeConfig_OpenCodeGoPreservesExplicitModel(t *testing.T) {
 	config := buildOpencodeConfig(&agentSettingsPayload{
 		OpencodeProvider: "opencode-go",
 		Model:            model,
-	}, nil)
+	})
 
 	if got := config["model"]; got != model {
 		t.Fatalf("model = %v, want %q", got, model)
 	}
 	if _, ok := config["provider"]; ok {
 		t.Fatalf("provider block present for OpenCode Go built-in provider: %#v", config["provider"])
+	}
+}
+
+func TestBuildOpencodeConfig_CustomProviderEmitsOpenAICompatibleBlock(t *testing.T) {
+	t.Parallel()
+
+	const baseURL = "https://llm.example.com/v1"
+	const model = "my-model-7b"
+	config := buildOpencodeConfig(&agentSettingsPayload{
+		OpencodeProvider: "custom",
+		OpencodeBaseURL:  baseURL,
+		Model:            model,
+	})
+
+	alias := sanitizeModelAlias(model)
+	if got := config["model"]; got != "custom/"+alias {
+		t.Fatalf("model = %v, want %q", got, "custom/"+alias)
+	}
+
+	providerBlock, ok := config["provider"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("provider block missing or wrong type for custom provider: %#v", config["provider"])
+	}
+	custom, ok := providerBlock["custom"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("custom provider entry missing: %#v", providerBlock)
+	}
+	if got := custom["npm"]; got != "@ai-sdk/openai-compatible" {
+		t.Fatalf("npm = %v, want @ai-sdk/openai-compatible", got)
+	}
+
+	options, ok := custom["options"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("custom provider options missing: %#v", custom)
+	}
+	if got := options["baseURL"]; got != baseURL {
+		t.Fatalf("baseURL = %v, want %q", got, baseURL)
+	}
+	if got := options["apiKey"]; got != "{env:OPENCODE_API_KEY}" {
+		t.Fatalf("apiKey = %v, want {env:OPENCODE_API_KEY}", got)
+	}
+
+	models, ok := custom["models"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("custom provider models missing: %#v", custom)
+	}
+	if _, ok := models[alias]; !ok {
+		t.Fatalf("model alias %q not registered: %#v", alias, models)
 	}
 }

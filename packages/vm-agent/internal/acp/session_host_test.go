@@ -2393,6 +2393,25 @@ func injectProxyCredentialForTest(
 	return envVars, settings
 }
 
+func injectProxyCredentialErrForTest(
+	t *testing.T,
+	host *SessionHost,
+	agentType string,
+	cred *agentCredential,
+) error {
+	t.Helper()
+	_, _, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		agentType,
+		cred,
+		nil,
+		getAgentCommandInfo(agentType, "api-key"),
+		nil,
+	)
+	return err
+}
+
 func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
 	t.Parallel()
 
@@ -2441,58 +2460,6 @@ func TestInjectAgentCredential_CallbackTokenPassthroughProxyReplacesWorkspaceTok
 	}
 }
 
-func TestInjectAgentCredential_PlatformOpenCodeConfiguresSettings(t *testing.T) {
-	t.Parallel()
-
-	host := newProxyCredentialTestHost(t, "workspace-token")
-	cred := proxyCredentialForTest(
-		"",
-		"openai-proxy",
-		"https://api.example.com/ai/v1",
-		"@cf/meta/llama-4-scout",
-		"callback-token",
-	)
-	envVars, settings := injectProxyCredentialForTest(t, host, "opencode", cred)
-	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_BASE_URL=https://api.example.com/ai/v1")
-	assertEnvEntry(t, envVars, "OPENCODE_PLATFORM_API_KEY=workspace-token")
-	if settings == nil {
-		t.Fatal("settings is nil, want OpenCode platform settings")
-	}
-	if settings.OpencodeProvider != "platform" {
-		t.Fatalf("OpencodeProvider = %q, want platform", settings.OpencodeProvider)
-	}
-	if settings.Model != "meta/llama-4-scout" {
-		t.Fatalf("Model = %q, want stripped Workers AI model", settings.Model)
-	}
-}
-
-func TestOpenCodeConfigOverridesCallbackTokenPassthroughReplacesWorkspaceToken(t *testing.T) {
-	t.Parallel()
-
-	host := newProxyCredentialTestHost(t, "workspace-token")
-	cred := proxyCredentialForTest(
-		"__sam_proxy__",
-		"openai-passthrough",
-		"https://api.example.com/ai/proxy/{wstoken}/openai/v1",
-		"openai/gpt-5.5",
-		"callback-token",
-	)
-
-	overrides := host.opencodeConfigOverrides(cred)
-	if overrides == nil {
-		t.Fatal("opencodeConfigOverrides returned nil")
-	}
-	if overrides.PlatformBaseURL != "https://api.example.com/ai/proxy/workspace-token/openai/v1" {
-		t.Fatalf("PlatformBaseURL = %q", overrides.PlatformBaseURL)
-	}
-	if strings.Contains(overrides.PlatformBaseURL, "{wstoken}") {
-		t.Fatalf("PlatformBaseURL still contains placeholder: %q", overrides.PlatformBaseURL)
-	}
-	if overrides.PlatformAPIKey != "workspace-token" {
-		t.Fatalf("PlatformAPIKey = %q, want callback token", overrides.PlatformAPIKey)
-	}
-}
-
 func TestInjectAgentCredential_ProxyRequiresCallbackToken(t *testing.T) {
 	t.Parallel()
 
@@ -2504,20 +2471,39 @@ func TestInjectAgentCredential_ProxyRequiresCallbackToken(t *testing.T) {
 		"",
 		"user-credential",
 	)
-	_, _, err := host.injectAgentCredential(
-		context.Background(),
-		"container-id",
-		"openai-codex",
-		cred,
-		nil,
-		getAgentCommandInfo("openai-codex", "api-key"),
-		nil,
-	)
+	err := injectProxyCredentialErrForTest(t, host, "openai-codex", cred)
 	if err == nil {
 		t.Fatal("injectAgentCredential returned nil error, want missing CallbackToken error")
 	}
 	if !strings.Contains(err.Error(), "CallbackToken is empty") {
 		t.Fatalf("error = %q, want CallbackToken message", err.Error())
+	}
+}
+
+func TestInjectAgentCredential_OpencodeRejectsInferenceProxy(t *testing.T) {
+	t.Parallel()
+
+	// OpenCode has no proxy descriptor, so any non-nil inferenceConfig (platform
+	// or passthrough proxy) must be a hard error rather than silently degrading
+	// to a plain env-var injection. CallbackToken is set so the failure is the
+	// "not supported" descriptor error, not the missing-token error.
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"sk-user",
+		"opencode-zen",
+		"",
+		"opencode/claude-sonnet-4-6",
+		"callback-token",
+	)
+	err := injectProxyCredentialErrForTest(t, host, "opencode", cred)
+	if err == nil {
+		t.Fatal("injectAgentCredential returned nil error, want unsupported-proxy error")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("error = %q, want not-supported message", err.Error())
+	}
+	if !strings.Contains(err.Error(), "opencode") {
+		t.Fatalf("error = %q, want agent name in message", err.Error())
 	}
 }
 
@@ -2730,11 +2716,6 @@ func TestInjectAgentCredential_OpenCodeProviderEnvVarOverrides(t *testing.T) {
 		{name: "default uses opencode env", provider: "", wantEnv: "OPENCODE_API_KEY=sk-test"},
 		{name: "zen uses opencode env", provider: "opencode-zen", wantEnv: "OPENCODE_API_KEY=sk-test"},
 		{name: "go uses opencode env", provider: "opencode-go", wantEnv: "OPENCODE_API_KEY=sk-test"},
-		{name: "scaleway keeps legacy env", provider: "scaleway", wantEnv: "SCW_SECRET_KEY=sk-test"},
-		{name: "managed uses opencode env", provider: "opencode-managed", wantEnv: "OPENCODE_API_KEY=sk-test"},
-		{name: "anthropic uses anthropic env", provider: "anthropic", wantEnv: "ANTHROPIC_API_KEY=sk-test"},
-		{name: "google vertex uses google env", provider: "google-vertex", wantEnv: "GOOGLE_API_KEY=sk-test"},
-		{name: "openai compatible uses opencode env", provider: "openai-compatible", wantEnv: "OPENCODE_API_KEY=sk-test"},
 		{name: "custom uses opencode env", provider: "custom", wantEnv: "OPENCODE_API_KEY=sk-test"},
 	}
 

@@ -148,14 +148,8 @@ func credentialEnvVarName(agentType string, settings *agentSettingsPayload, info
 		return info.envVarName
 	}
 	switch settings.OpencodeProvider {
-	case "opencode-zen", "opencode-go", "opencode-managed", "openai-compatible", "custom":
+	case "opencode-zen", "opencode-go", "custom":
 		return "OPENCODE_API_KEY"
-	case "scaleway":
-		return "SCW_SECRET_KEY"
-	case "anthropic":
-		return "ANTHROPIC_API_KEY"
-	case "google-vertex":
-		return "GOOGLE_API_KEY"
 	default:
 		return info.envVarName
 	}
@@ -208,26 +202,7 @@ func (h *SessionHost) injectPassthroughProxyCredential(
 	settings *agentSettingsPayload,
 	envVars []string,
 ) ([]string, *agentSettingsPayload, error) {
-	if h.config.CallbackToken == "" {
-		return envVars, settings, fmt.Errorf("passthrough proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
-	}
-
-	baseURL := h.proxyBaseURL(cred)
-	if descriptor, ok := proxyEnvDescriptorFor(agentType, cred.inferenceConfig.Provider); ok {
-		envVars = appendProxyEnv(envVars, descriptor, baseURL, cred.credential, cred.inferenceConfig.Model)
-		slog.Info("Passthrough proxy credential injected",
-			"agentType", agentType, "provider", cred.inferenceConfig.Provider,
-			"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
-			"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
-		return envVars, settings, nil
-	}
-
-	envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+baseURL, "OPENCODE_PLATFORM_API_KEY="+cred.credential)
-	settings = configureOpenCodePlatformSettings(settings, cred.inferenceConfig.Model)
-	slog.Info("OpenCode passthrough proxy credential injected",
-		"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
-		"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
-	return envVars, settings, nil
+	return h.injectProxyCredential(agentType, cred, settings, envVars, "passthrough proxy", cred.credential, "credentialLen")
 }
 
 func (h *SessionHost) injectPlatformProxyCredential(
@@ -236,26 +211,36 @@ func (h *SessionHost) injectPlatformProxyCredential(
 	settings *agentSettingsPayload,
 	envVars []string,
 ) ([]string, *agentSettingsPayload, error) {
+	return h.injectProxyCredential(agentType, cred, settings, envVars, "platform AI proxy", h.config.CallbackToken, "callbackTokenLen")
+}
+
+// injectProxyCredential is the shared implementation behind the passthrough and
+// platform proxy credential injectors. They differ only in the label used for
+// diagnostics, the credential value forwarded to the agent env, and the log
+// field name that records the credential length.
+func (h *SessionHost) injectProxyCredential(
+	agentType string,
+	cred *agentCredential,
+	settings *agentSettingsPayload,
+	envVars []string,
+	label string,
+	credential string,
+	credLenKey string,
+) ([]string, *agentSettingsPayload, error) {
 	if h.config.CallbackToken == "" {
-		return envVars, settings, fmt.Errorf("platform AI proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
+		return envVars, settings, fmt.Errorf("%s configured but CallbackToken is empty for workspace %s", label, h.config.WorkspaceID)
 	}
 
 	baseURL := h.proxyBaseURL(cred)
-	if descriptor, ok := proxyEnvDescriptorFor(agentType, cred.inferenceConfig.Provider); ok {
-		envVars = appendProxyEnv(envVars, descriptor, baseURL, h.config.CallbackToken, cred.inferenceConfig.Model)
-		slog.Info("AI proxy credential injected",
-			"agentType", agentType, "provider", cred.inferenceConfig.Provider,
-			"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
-			"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
-		return envVars, settings, nil
+	descriptor, ok := proxyEnvDescriptorFor(agentType, cred.inferenceConfig.Provider)
+	if !ok {
+		return envVars, settings, fmt.Errorf("%s not supported for agent %q provider %q in workspace %s", label, agentType, cred.inferenceConfig.Provider, h.config.WorkspaceID)
 	}
-
-	envVars = append(envVars, "OPENCODE_PLATFORM_BASE_URL="+baseURL, "OPENCODE_PLATFORM_API_KEY="+h.config.CallbackToken)
-	settings = configureOpenCodePlatformSettings(settings, cred.inferenceConfig.Model)
-	slog.Info("OpenCode AI proxy credential injected",
+	envVars = appendProxyEnv(envVars, descriptor, baseURL, credential, cred.inferenceConfig.Model)
+	slog.Info("Proxy credential injected",
+		"label", label, "agentType", agentType, "provider", cred.inferenceConfig.Provider,
 		"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
-		"settingsModel", settings.Model, "settingsProvider", settings.OpencodeProvider,
-		"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
+		credLenKey, len(credential), "workspaceId", h.config.WorkspaceID)
 	return envVars, settings, nil
 }
 
@@ -310,17 +295,6 @@ func appendProxyEnv(envVars []string, descriptor proxyEnvDescriptor, baseURL, cr
 		envVars = append(envVars, descriptor.modelEnv+"="+model)
 	}
 	return envVars
-}
-
-func configureOpenCodePlatformSettings(settings *agentSettingsPayload, model string) *agentSettingsPayload {
-	if settings == nil {
-		settings = &agentSettingsPayload{}
-	}
-	settings.OpencodeProvider = "platform"
-	if settings.Model == "" && model != "" {
-		settings.Model = stripCFPrefix(model)
-	}
-	return settings
 }
 
 func (h *SessionHost) applyModelAndExtraEnv(agentType string, settings *agentSettingsPayload, envVars []string) ([]string, *agentSettingsPayload) {
@@ -382,8 +356,7 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 }
 
 func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) {
-	overrides := h.opencodeConfigOverrides(cred)
-	opencodeConfig := buildOpencodeConfig(startup.settings, overrides)
+	opencodeConfig := buildOpencodeConfig(startup.settings)
 	configJSON, err := json.Marshal(opencodeConfig)
 	if err != nil {
 		slog.Error("opencode: failed to marshal config", "error", err)
@@ -404,26 +377,6 @@ func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agen
 			slog.Warn("Failed to pre-install OpenCode provider dependency (agent may fail silently)",
 				"package", npmPkg, "provider", provider, "error", err)
 		}
-	}
-}
-
-func (h *SessionHost) opencodeConfigOverrides(cred *agentCredential) *opencodeConfigOverrides {
-	if cred.inferenceConfig == nil {
-		return nil
-	}
-	switch cred.inferenceConfig.APIKeySource {
-	case "callback-token":
-		return &opencodeConfigOverrides{
-			PlatformBaseURL: h.proxyBaseURL(cred),
-			PlatformAPIKey:  h.config.CallbackToken,
-		}
-	case "user-credential":
-		return &opencodeConfigOverrides{
-			PlatformBaseURL: h.proxyBaseURL(cred),
-			PlatformAPIKey:  cred.credential,
-		}
-	default:
-		return nil
 	}
 }
 
