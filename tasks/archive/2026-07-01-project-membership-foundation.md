@@ -21,7 +21,7 @@ Implement only the project-membership foundation:
   - No shared project list behavior.
   - No project-owned infra credentials.
   - No broad route migration.
-- Optionally migrate one low-risk proof point only if useful; otherwise keep `requireOwnedProject()` behavior-preserving by delegating through the new membership primitive while preserving owner-only access.
+- Keep `requireOwnedProject()` owner-only and behavior-preserving; migrate routes to membership helpers only in later explicit route-migration work.
 
 ## Research Findings
 
@@ -36,17 +36,17 @@ Implement only the project-membership foundation:
 
 ## Implementation Checklist
 
-- [ ] Add D1 migration `0081_project_members.sql` with additive `project_members` table, indexes, and owner backfill from `projects.user_id`.
-- [ ] Add `projectMembers` schema/table and inferred types in `apps/api/src/db/schema.ts`.
-- [ ] Add membership roles/capability definitions in API code near project auth.
-- [ ] Implement `requireProjectAccess()` and `requireProjectCapability()` with defense-in-depth user/project/status checks.
-- [ ] Preserve existing `requireOwnedProject()` behavior so current owners still pass and non-owners still receive `404`.
-- [ ] Seed owner project membership in all project creation paths discovered during research.
-- [ ] Add focused unit tests for membership auth helper behavior, including mismatched returned rows and missing/inactive memberships.
-- [ ] Add migration/schema tests proving the migration file creates/backfills the expected table and indexes.
-- [ ] Run local validation: lint, typecheck, targeted tests, full test/build suite as required by `/do`.
-- [ ] Deploy to staging and verify D1 migration state via Cloudflare API.
-- [ ] Use Playwright token-login as `SAM_PLAYWRIGHT_PRIMARY_USER`, open staging, navigate to a test project, and submit a chat message successfully.
+- [x] Add D1 migration `0081_project_members.sql` with additive `project_members` table, indexes, and owner backfill from `projects.user_id`.
+- [x] Add `projectMembers` schema/table and inferred types in `apps/api/src/db/schema.ts`.
+- [x] Add membership roles/capability definitions in API code near project auth.
+- [x] Implement `requireProjectAccess()` and `requireProjectCapability()` with defense-in-depth user/project/status checks.
+- [x] Preserve existing `requireOwnedProject()` behavior so current owners still pass and non-owners still receive `404`.
+- [x] Seed owner project membership in all project creation paths discovered during research.
+- [x] Add focused unit tests for membership auth helper behavior, including mismatched returned rows and missing/inactive memberships.
+- [x] Add migration/schema tests proving the migration file creates/backfills the expected table and indexes.
+- [x] Run local validation: lint, typecheck, targeted tests, full test/build suite as required by `/do`.
+- [x] Deploy to staging and verify D1 migration state via Cloudflare API.
+- [x] Use Playwright token-login as `SAM_PLAYWRIGHT_PRIMARY_USER`, open staging, navigate to a test project, and submit a chat message successfully.
 
 ## Acceptance Criteria
 
@@ -57,6 +57,15 @@ Implement only the project-membership foundation:
 - Membership helpers distinguish access from capabilities and fail closed for missing, inactive, or insufficient membership.
 - Tests cover IDOR/defense-in-depth behavior with mismatched rows.
 - Staging deploy succeeds, the migration is visible in D1, and the primary staging user can still submit a project chat message.
+
+## Validation Evidence
+
+- Local validation passed: focused tests, changed-file lint, API typecheck, and `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- Migration safety passed with 0 new violations.
+- Specialist review passed: task-completion-validator, security-auditor, cloudflare-specialist, constitution-validator, and test-engineer.
+- Staging deploy run `28549058515` succeeded for branch `sam/project-membership-foundation` at `7aa53ace0dde633ff987412cf99cdaa9d0bcf4c7`.
+- Staging D1 has `project_members`, indexes `idx_project_members_project_status` and `idx_project_members_user_status`, recorded migration `0081_project_members.sql`, and 26/26 projects backfilled with active owner memberships.
+- Primary-user staging UI smoke passed on Test Project 1 after token-login and dismissing the account setup overlay: POST `/api/projects/01KJNR9R3TEN3KX1ETE33852R8/tasks/submit` returned 202 and created task `01KWFV02QBT2G4HG81ZTYTWFFK` / session `b34a46a2-0a1d-4b1f-a21e-666ca5c56d6d`.
 
 ## Explicit Non-Goals
 
