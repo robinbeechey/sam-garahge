@@ -77,25 +77,25 @@ conversion.
 
 ## Implementation checklist
 
-- [ ] Add `"sync/atomic"` import to scanner.go
-- [ ] Struct: `consecutiveFailures atomic.Int64`, `containerResolved atomic.Bool`
-- [ ] `NewScanner`: post-construction `s.containerResolved.Store(cfg.ContainerID != "")`
-- [ ] `ConsecutiveFailures()` → `int(s.consecutiveFailures.Load())`
-- [ ] `ContainerResolved()` → `s.containerResolved.Load()`
-- [ ] `scan()` 166 → `s.consecutiveFailures.Store(0)`
-- [ ] `resolveContainerReplacing` 285-287 → Load/Store
-- [ ] `recordResolutionFailure` → `n := s.consecutiveFailures.Add(1)`, reuse `n`
-- [ ] `handleScanFailure` → `n := s.consecutiveFailures.Add(1)`, log `n`
-- [ ] Update `scanner_test.go` direct field reads → `.Load()`
-- [ ] Add `TestScanner_ConcurrentDiagnosticsGettersRaceFree`
+- [x] Add `"sync/atomic"` import to scanner.go
+- [x] Struct: `consecutiveFailures atomic.Int64`, `containerResolved atomic.Bool`
+- [x] `NewScanner`: post-construction `s.containerResolved.Store(cfg.ContainerID != "")`
+- [x] `ConsecutiveFailures()` → `int(s.consecutiveFailures.Load())`
+- [x] `ContainerResolved()` → `s.containerResolved.Load()`
+- [x] `scan()` 166 → `s.consecutiveFailures.Store(0)`
+- [x] `resolveContainerReplacing` 285-287 → Load/Store
+- [x] `recordResolutionFailure` → `n := s.consecutiveFailures.Add(1)`, reuse `n`
+- [x] `handleScanFailure` → `n := s.consecutiveFailures.Add(1)`, log `n`
+- [x] Update `scanner_test.go` direct field reads → `.Load()`
+- [x] Add `TestScanner_ConcurrentDiagnosticsGettersRaceFree`
 
 ## Acceptance criteria
 
-- [ ] `go test -race ./internal/ports/...` passes (including the new concurrency test)
-- [ ] `go vet ./...` clean
-- [ ] `go build ./...` succeeds
-- [ ] The new regression test fails on the pre-fix code (verified once)
-- [ ] No behavior change to port detection, event emission, or diagnostics output
+- [x] `go test -race ./internal/ports/...` passes (including the new concurrency test)
+- [x] `go vet ./...` clean
+- [x] `go build ./...` succeeds
+- [x] The new regression test fails on the pre-fix code (verified once)
+- [x] No behavior change to port detection, event emission, or diagnostics output
 
 ## Scope / non-goals
 
@@ -105,7 +105,37 @@ conversion.
 - vm-agent-only concurrency-correctness fix; primary verification is
   `go test -race` + `go vet` + `go build`.
 
+## Post-Mortem
+
+- **What broke**: No user-visible failure was reported — this was found by a
+  proactive spot-check. `Scanner.ConsecutiveFailures()` and
+  `ContainerResolved()` read `s.consecutiveFailures` / `s.containerResolved`
+  from the HTTP diagnostics-handler goroutine
+  (`ports_proxy.go:214-215`) while the background scan loop mutated the same
+  fields without synchronization — a genuine cross-goroutine data race that
+  `go test -race` flags.
+- **Root cause**: When the diagnostics getters were added, the two fields were
+  read outside any lock. In `resolveContainerReplacing`, the adjacent
+  `containerID` write sits inside an `s.mu` critical section but the two
+  race-prone fields were left just outside it — one field protected, two
+  dropped. The getters had no lock at all.
+- **Timeline**: Latent since the diagnostics getters were introduced. Found and
+  fixed 2026-07-01 during a codebase spot-check.
+- **Why it wasn't caught**: Existing tests only read the fields directly AFTER
+  `Stop()`, so no test ran the getters concurrently with the loop; `-race` had
+  nothing to flag. Test suite proved the fields were readable, not that they
+  were race-free under concurrent access.
+- **Class of bug**: Unsynchronized shared state exposed to an HTTP handler
+  goroutine while a background loop mutates it — "diagnostic/getter reads a
+  loop-mutated field without synchronization."
+- **Process fix**: Added `.claude/rules/46-vm-agent-diagnostic-getter-sync.md`
+  requiring vm-agent getters exposed to the HTTP server to synchronize access to
+  any field a background loop mutates, plus a concurrent-getter `-race`
+  regression test. This is the rule that, had it existed, would have blocked the
+  original getters from merging unsynchronized.
+
 ## References
 
 - `.claude/rules/02-quality-gates.md` — regression test that would have caught it
+- `.claude/rules/46-vm-agent-diagnostic-getter-sync.md` — process fix (this PR)
 - Go `sync/atomic` — idiomatic shared counter/flag
