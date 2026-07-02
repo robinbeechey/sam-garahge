@@ -14,7 +14,10 @@
  */
 import {
   DEFAULT_TASK_RECONCILIATION_IDLE_MS,
+  DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP,
   DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
+  DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS,
+  DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS,
   DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS,
   DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS,
   DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
@@ -26,6 +29,10 @@ import { cancelAgentSessionOnNode, sendPromptToAgentOnNode } from '../../service
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
+import {
+  type ReconciliationProcessingHooks,
+  terminallyFailDeadTarget,
+} from './reconciliation-dead-target';
 import { upsertActivityState } from './session-state';
 import type { Env as DOEnv } from './types';
 
@@ -64,6 +71,10 @@ interface WorkspaceDeliveryTarget {
   nodeId: string;
   userId: string;
 }
+
+type WorkspaceDeliveryTargetResult =
+  | { ok: true; target: WorkspaceDeliveryTarget }
+  | { ok: false; reason: string; nodeId: string | null; userId: string | null; projectId: string | null };
 
 function envNumber(env: DOEnv, key: string, fallback: number): number {
   const value = Number.parseInt((env as unknown as Record<string, string | undefined>)[key] ?? '', 10);
@@ -105,6 +116,30 @@ function minReconciliationAlarmDelayMs(env: DOEnv): number {
     env,
     'TASK_RECONCILIATION_MIN_ALARM_DELAY_MS',
     DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
+  );
+}
+
+function maxCandidatesPerSweep(env: DOEnv): number {
+  return envNumber(
+    env,
+    'TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP',
+    DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP,
+  );
+}
+
+function nodeHeartbeatStaleMs(env: DOEnv): number {
+  return envNumber(
+    env,
+    'TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS',
+    DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS,
+  );
+}
+
+function reconciliationNodeCallTimeoutMs(env: DOEnv): number {
+  return envNumber(
+    env,
+    'TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS',
+    DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS,
   );
 }
 
@@ -256,25 +291,32 @@ export async function processReconciliationCandidates(
   sql: SqlStorage,
   env: DOEnv,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
+  hooks: ReconciliationProcessingHooks = {},
 ): Promise<number> {
-  const candidates = await getReconciliationCandidates(sql, env);
+  const candidates = (await getReconciliationCandidates(sql, env)).slice(0, maxCandidatesPerSweep(env));
   if (candidates.length === 0) return 0;
 
   const deadlineMs = reconciliationDeadlineMs(env);
 
-  let processed = 0;
-
-  for (const candidate of candidates) {
+  const results = await Promise.allSettled(candidates.map(async (candidate) => {
     try {
+      const targetResult = await resolveWorkspaceDeliveryTarget(
+        env as unknown as WorkerEnv,
+        candidate.workspaceId,
+        hooks.projectId ?? null,
+      );
+      if (!targetResult.ok) {
+        await terminallyFailDeadTarget(sql, env, candidate, targetResult, hooks);
+        return 1;
+      }
+
       if (candidate.action === 'observe_prompt') {
-        if (recordPromptInFlightObservation(sql, candidate)) processed++;
-        continue;
+        return recordPromptInFlightObservation(sql, candidate) ? 1 : 0;
       }
 
       if (candidate.action === 'cancel_prompt') {
-        await cancelStalledPrompt(sql, env, candidate, broadcastEvent);
-        processed++;
-        continue;
+        await cancelStalledPrompt(sql, env, candidate, targetResult.target, broadcastEvent);
+        return 1;
       }
 
       // 1. Persist the check-in as a user-role message with SAM metadata
@@ -294,18 +336,15 @@ export async function processReconciliationCandidates(
         expiresAt: Date.now() + deadlineMs,
       });
 
-      // 3. Send the prompt to the VM agent (best-effort — if the agent is
-      //    unreachable, the deadline marker will still fire and fail the task)
-      try {
-        await sendCheckinToAgent(env, candidate);
-      } catch (err) {
+      // 3. Send the prompt to the VM agent off the alarm critical path. The
+      //    marker above is the correctness boundary: send failure lets it expire.
+      waitUntil(hooks, sendCheckinToAgent(env, candidate, targetResult.target).catch((err) => {
         log.warn('reconciliation.send_prompt_failed', {
           sessionId: candidate.sessionId,
           workspaceId: candidate.workspaceId,
           error: err instanceof Error ? err.message : String(err),
         });
-        // Don't abort — the attention marker deadline will handle the failure
-      }
+      }));
 
       // 4. Record activity event
       recordActivityEventInternal(
@@ -349,17 +388,18 @@ export async function processReconciliationCandidates(
         idleDurationMs: candidate.idleDurationMs,
       });
 
-      processed++;
+      return 1;
     } catch (err) {
       log.error('reconciliation.checkin_failed', {
         sessionId: candidate.sessionId,
         taskId: candidate.taskId,
         ...serializeError(err),
       });
+      return 0;
     }
-  }
+  }));
 
-  return processed;
+  return results.reduce((count, result) => count + (result.status === 'fulfilled' ? result.value : 0), 0);
 }
 
 function recordPromptInFlightObservation(
@@ -411,11 +451,10 @@ async function cancelStalledPrompt(
   sql: SqlStorage,
   env: DOEnv,
   candidate: ReconciliationCandidate,
+  target: WorkspaceDeliveryTarget,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
 ): Promise<void> {
   const workerEnv = env as unknown as WorkerEnv;
-  const target = await resolveWorkspaceDeliveryTarget(workerEnv, candidate.workspaceId);
-  if (!target) return;
 
   const result = await cancelAgentSessionOnNode(
     target.nodeId,
@@ -423,6 +462,7 @@ async function cancelStalledPrompt(
     candidate.acpSessionId,
     workerEnv,
     target.userId,
+    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) },
   );
 
   if (!result.success && result.status === 409) {
@@ -472,10 +512,9 @@ async function cancelStalledPrompt(
 async function sendCheckinToAgent(
   env: DOEnv,
   candidate: ReconciliationCandidate,
+  target: WorkspaceDeliveryTarget,
 ): Promise<void> {
   const workerEnv = env as unknown as WorkerEnv;
-  const target = await resolveWorkspaceDeliveryTarget(workerEnv, candidate.workspaceId);
-  if (!target) return;
 
   await sendPromptToAgentOnNode(
     target.nodeId,
@@ -484,23 +523,137 @@ async function sendCheckinToAgent(
     CHECKIN_PROMPT,
     workerEnv,
     target.userId,
+    undefined,
+    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) },
   );
 }
 
 async function resolveWorkspaceDeliveryTarget(
   env: WorkerEnv,
   workspaceId: string,
-): Promise<WorkspaceDeliveryTarget | null> {
+  projectId: string | null,
+): Promise<WorkspaceDeliveryTargetResult> {
+  const staleMs = nodeHeartbeatStaleMs(env as unknown as DOEnv);
   const wsRow = await env.DATABASE.prepare(
-    'SELECT node_id, user_id FROM workspaces WHERE id = ?',
-  ).bind(workspaceId).first<{ node_id: string | null; user_id: string }>();
+    `SELECT
+       w.node_id,
+       w.user_id,
+       w.project_id,
+       n.status AS node_status,
+       n.health_status,
+       n.last_heartbeat_at
+     FROM workspaces w
+     LEFT JOIN nodes n ON n.id = w.node_id
+     WHERE w.id = ?
+     LIMIT 1`,
+  ).bind(workspaceId).first<{
+    node_id: string | null;
+    user_id: string;
+    project_id: string | null;
+    node_status: string | null;
+    health_status: string | null;
+    last_heartbeat_at: string | null;
+  }>();
+
+  if (!wsRow) {
+    log.warn('reconciliation.workspace_missing', { workspaceId });
+    return { ok: false, reason: 'workspace_missing', nodeId: null, userId: null, projectId: null };
+  }
+
+  if (projectId && wsRow.project_id && wsRow.project_id !== projectId) {
+    log.error('reconciliation.workspace_project_mismatch', {
+      workspaceId,
+      expectedProjectId: projectId,
+      actualProjectId: wsRow.project_id,
+      action: 'rejected',
+    });
+    return {
+      ok: false,
+      reason: 'workspace_project_mismatch',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
+  }
 
   if (!wsRow?.node_id) {
     log.warn('reconciliation.workspace_missing_node', { workspaceId });
-    return null;
+    return {
+      ok: false,
+      reason: 'workspace_missing_node',
+      nodeId: null,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
   }
 
-  return { nodeId: wsRow.node_id, userId: wsRow.user_id };
+  if (wsRow.node_status !== 'running') {
+    log.warn('reconciliation.node_not_running', {
+      workspaceId,
+      nodeId: wsRow.node_id,
+      nodeStatus: wsRow.node_status,
+    });
+    return {
+      ok: false,
+      reason: wsRow.node_status ? 'node_not_running' : 'node_missing',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
+  }
+
+  if (wsRow.health_status !== 'healthy') {
+    log.warn('reconciliation.node_unhealthy', {
+      workspaceId,
+      nodeId: wsRow.node_id,
+      healthStatus: wsRow.health_status,
+    });
+    return {
+      ok: false,
+      reason: 'node_unhealthy',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
+  }
+
+  if (!wsRow.last_heartbeat_at) {
+    log.warn('reconciliation.node_missing_heartbeat', { workspaceId, nodeId: wsRow.node_id });
+    return {
+      ok: false,
+      reason: 'node_missing_heartbeat',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
+  }
+
+  const heartbeatAt = new Date(wsRow.last_heartbeat_at).getTime();
+  if (!Number.isFinite(heartbeatAt) || Date.now() - heartbeatAt > staleMs) {
+    log.warn('reconciliation.node_stale_heartbeat', {
+      workspaceId,
+      nodeId: wsRow.node_id,
+      lastHeartbeatAt: wsRow.last_heartbeat_at,
+      staleMs,
+    });
+    return {
+      ok: false,
+      reason: 'node_stale_heartbeat',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
+  }
+
+  return { ok: true, target: { nodeId: wsRow.node_id, userId: wsRow.user_id } };
+}
+
+function waitUntil(hooks: ReconciliationProcessingHooks, promise: Promise<unknown>): void {
+  if (hooks.waitUntil) {
+    hooks.waitUntil(promise);
+    return;
+  }
+  void promise;
 }
 
 /**
