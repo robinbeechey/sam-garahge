@@ -44,6 +44,7 @@ import {
   UpsertProjectRuntimeEnvVarSchema,
   UpsertProjectRuntimeFileSchema,
 } from '../../schemas';
+import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { encrypt } from '../../services/encryption';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { getRuntimeLimits } from '../../services/limits';
@@ -59,6 +60,7 @@ import {
   PROJECT_ENV_KEY_PATTERN,
   requireGitHubUserAccessToken,
   requireOwnedInstallation,
+  toArtifactsRepoName,
 } from './_helpers';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
@@ -165,12 +167,59 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
       || c.env.ARTIFACTS_DEFAULT_BRANCH
       || ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
 
-    // Create Artifacts repo — name includes projectId for uniqueness
-    const repoName = `${normalizedName}-${projectId}`;
+    // Validate the branch name before it is embedded verbatim in the git
+    // receive-pack pkt-line frame during seeding. Reject shell/control/protocol
+    // metacharacters (spaces, newlines, NUL) — same guard as workspace creation.
+    if (defaultBranch.length > 255 || !/^[a-zA-Z0-9._\-/]+$/.test(defaultBranch)) {
+      throw errors.badRequest(
+        'defaultBranch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed (max 255 chars).'
+      );
+    }
+
+    // Create Artifacts repo — name includes projectId for uniqueness.
+    // Must be sanitized: Artifacts rejects uppercase/spaces (the ULID projectId
+    // is uppercase and normalizedName preserves spaces).
+    const repoName = toArtifactsRepoName(normalizedName, projectId);
     const created = await c.env.ARTIFACTS.create(repoName, {
       description: description || undefined,
       setDefaultBranch: defaultBranch,
     });
+
+    // Seed an initial README commit so the repo has a real default-branch ref.
+    // A freshly-created Artifacts repo is empty, and the VM agent bootstrap
+    // clones with `git clone --branch <defaultBranch>` (bootstrap.go), which
+    // fails against a repo whose default branch does not exist yet. The README
+    // also orients agents (project name, description, SAM MCP tools). If seeding
+    // fails the repo is unusable, so we abort creation and log the orphan.
+    try {
+      await seedArtifactsReadme({
+        remote: created.remote,
+        token: created.token,
+        branch: defaultBranch,
+        projectName: name,
+        description,
+      });
+    } catch (seedError) {
+      log.error('project_create.artifacts_seed_failed', {
+        projectId,
+        repoName: created.name,
+        error: seedError instanceof Error ? seedError.message : String(seedError),
+        action: 'orphaned_artifacts_repo',
+      });
+      // Best-effort cleanup: the repo exists but has no usable content, and no
+      // project row will reference it. Delete it so it does not leak quota.
+      try {
+        await c.env.ARTIFACTS.delete(created.name);
+      } catch (cleanupError) {
+        log.error('project_create.artifacts_seed_cleanup_failed', {
+          projectId,
+          repoName: created.name,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          action: 'orphaned_artifacts_repo_cleanup_failed',
+        });
+      }
+      throw errors.internal('Failed to initialize Artifacts repository');
+    }
 
     // Store the full Artifacts clone URL as repository so normalizeRepoURL()
     // on the VM agent passes it through as-is (it handles https:// URLs correctly).
@@ -799,8 +848,10 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     }
   }
 
-  // Only verify GitHub repository access for GitHub-backed projects
-  if (existing.installationId) {
+  // Only verify GitHub repository access for GitHub-backed projects.
+  // Artifacts projects carry a sentinel installationId but must not be routed
+  // through GitHub access verification (it would 404 on the sentinel).
+  if (existing.installationId && existing.repoProvider !== 'artifacts') {
     const installation = await requireOwnedInstallation(db, existing.installationId, userId);
     const accessToken = await requireGitHubUserAccessToken(c, userId);
     await assertRepositoryAccess(

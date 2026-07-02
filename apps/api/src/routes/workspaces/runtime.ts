@@ -1254,7 +1254,11 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 
-    const ttl = parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || 3600;
+    // Clamp the token TTL to a sane range: a negative/zero/NaN or excessively
+    // large configured value must not mint a token that never expires (or expires
+    // instantly). Default 1h; hard cap 24h.
+    const rawTtl = Number.parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10);
+    const ttl = Number.isFinite(rawTtl) && rawTtl > 0 && rawTtl <= 86400 ? rawTtl : 3600;
     // Use requested scope or default to 'write' (agents need push access)
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
     const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
@@ -1263,10 +1267,36 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     // Strip ?expires= suffix from token for git credential use
     const tokenSecret = tokenResult.plaintext.split('?expires=')[0] || tokenResult.plaintext;
 
+    // Prefer the stored project.repository as the clone URL: it is `created.remote`
+    // captured at project creation and is exactly what the VM agent cloned, so its
+    // host is guaranteed to match what git requests from the credential helper. The
+    // Artifacts binding's `get().remote` has been observed to come back empty on
+    // staging (unlike `create().remote`); when that happens an empty cloneUrl makes
+    // the VM agent default the credential host to github.com, which then fails to
+    // match the real Artifacts host and returns no credential (git fetch/push break).
+    const cloneUrl = repositoryName || repo.remote || '';
+    if (!repo.remote) {
+      log.warn('workspace_git_token.artifacts_remote_empty', {
+        workspaceId: workspace.id,
+        projectId: workspace.projectId,
+        artifactsRepoId,
+        usedStoredRepository: !!repositoryName,
+        action: 'fell_back_to_stored_repository',
+      });
+    }
+    if (!cloneUrl) {
+      log.error('workspace_git_token.artifacts_clone_url_missing', {
+        workspaceId: workspace.id,
+        projectId: workspace.projectId,
+        artifactsRepoId,
+        action: 'clone_url_empty',
+      });
+    }
+
     return c.json({
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
-      cloneUrl: repo.remote,
+      cloneUrl,
     });
   }
 

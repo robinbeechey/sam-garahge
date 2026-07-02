@@ -194,7 +194,8 @@ describe('workspace git-token GitHub scoping', () => {
         // Thenable: queries that await `.where()` directly (no `.limit()`) resolve
         // from whereResponses. The `.limit()` chains never trigger this because the
         // builder itself is not awaited — only the Promise returned by `.limit()`.
-        then: ( // NOSONAR - intentional thenable mirroring drizzle's awaitable query builder.
+        then: (
+          // NOSONAR - intentional thenable mirroring drizzle's awaitable query builder.
           onFulfilled: (value: unknown[]) => unknown,
           onRejected?: (reason: unknown) => unknown
         ) => Promise.resolve(resolveQueued(whereResponses)).then(onFulfilled, onRejected),
@@ -269,6 +270,138 @@ describe('workspace git-token GitHub scoping', () => {
       expiresAt: '2026-06-06T21:00:00.000Z',
     });
     expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  // Regression: on staging the Artifacts binding's get().remote came back EMPTY
+  // (unlike create().remote), so the endpoint returned an empty cloneUrl. The VM
+  // agent then defaulted the git credential host to github.com, which never
+  // matches the real Artifacts host — so `git fetch`/`push` got no credential
+  // (helper returned github creds without host, and 204 when git asked for the
+  // Artifacts host). The endpoint must fall back to the stored project.repository,
+  // which is `created.remote` captured at project creation and is exactly what the
+  // VM agent cloned (so its host is guaranteed to match git's request).
+  it('falls back to stored project.repository as cloneUrl when the Artifacts binding returns an empty remote', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: '',
+          createToken: vi.fn().mockResolvedValue({
+            plaintext: 'artifacts-token',
+            expiresAt: '2026-06-06T20:00:00.000Z',
+          }),
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      token: 'artifacts-token',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+      cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+    });
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('falls back to stored project.repository as cloneUrl when the Artifacts binding omits remote entirely', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          // no `remote` field at all (undefined)
+          createToken: vi.fn().mockResolvedValue({
+            plaintext: 'artifacts-token',
+            expiresAt: '2026-06-06T20:00:00.000Z',
+          }),
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+    });
+  });
+
+  it('returns 200 with an empty cloneUrl when both binding remote and project.repository are empty', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: '',
+          createToken: vi.fn().mockResolvedValue({
+            plaintext: 'artifacts-token',
+            expiresAt: '2026-06-06T20:00:00.000Z',
+          }),
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow({ repository: null })]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ token: 'artifacts-token', cloneUrl: '' });
+  });
+
+  it('rejects the Artifacts git-token path with 403 when ARTIFACTS_ENABLED is not "true"', async () => {
+    // mockEnv has no ARTIFACTS_ENABLED / ARTIFACTS binding.
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when an Artifacts project has a null artifactsRepoId', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: { get: vi.fn() },
+    } as unknown as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow({ artifactsRepoId: null })]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(500);
+  });
+
+  it('mints a read-scoped Artifacts token when ?scope=read is requested', async () => {
+    const createToken = vi.fn().mockResolvedValue({
+      plaintext: 'artifacts-read-token',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+    });
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+          createToken,
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request(
+      '/ws/ws-1/git-token?scope=read',
+      { method: 'POST' },
+      artifactsEnv
+    );
+
+    expect(res.status).toBe(200);
+    expect(createToken).toHaveBeenCalledWith('read', expect.any(Number));
   });
 
   it('falls back to repository-name scoping for legacy projects without a repo id', async () => {

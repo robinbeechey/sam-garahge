@@ -20,6 +20,30 @@ export function normalizeProjectName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/**
+ * Builds a valid Cloudflare Artifacts repository name from a project name and
+ * projectId. Artifacts rejects names containing uppercase letters, spaces, or
+ * other non `[a-z0-9-]` characters ("Invalid repo name"). The projectId is a
+ * ULID (uppercase Crockford base32) and `normalizeProjectName` preserves
+ * spaces, so the raw `${name}-${projectId}` is always invalid. This lowercases
+ * and hyphen-sanitizes both parts, collapses/trims hyphens, and caps the name
+ * component so the full name stays comfortably short. The projectId (lowercased,
+ * still unique) is always preserved for repo uniqueness.
+ */
+export function toArtifactsRepoName(projectName: string, projectId: string): string {
+  const sanitize = (value: string): string =>
+    value
+      .toLowerCase()
+      // Collapse every run of non-alphanumerics (spaces, symbols, existing
+      // hyphens) into a single hyphen, then trim a single leading/trailing one.
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+
+  const namePart = sanitize(projectName).slice(0, 30).replace(/-$/, '');
+  const idPart = sanitize(projectId);
+  return namePart ? `${namePart}-${idPart}` : `repo-${idPart}`;
+}
+
 export function normalizeRepository(repository: string): string {
   return repository.trim().toLowerCase();
 }
