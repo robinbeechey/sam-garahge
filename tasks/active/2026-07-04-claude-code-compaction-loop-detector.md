@@ -27,21 +27,29 @@ SAM-managed Claude Code sessions can enter repeated `Compacting...` / `Compactin
 
 ## Implementation Checklist
 
-- [ ] Add configurable compaction-loop thresholds to the API env shape and defaults local to the detector:
+- [x] Add configurable compaction-loop thresholds to the API env shape and defaults local to the detector:
   - enable flag: `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`
   - recent message limit/window: `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT`
   - minimum marker pairs: `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`
   - maximum messages between markers if needed: `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`
-- [ ] Add pure detector logic in `apps/api/src/scheduled/stuck-tasks.ts` or a small sibling module so tests can cover marker matching without D1/DO setup.
-- [ ] In `recoverStuckTasks`, for active `in_progress` Claude Code tasks, resolve the task session and inspect recent text messages via ProjectData.
-- [ ] Detect repeated `Compacting...` / `Compacting completed` marker evidence in a rolling recent-message window.
-- [ ] On detection, fail the task visibly with a diagnostic reason, observability context containing marker counts/snippets/session ID, a system `task_status_events` row, trigger execution sync, and cleanup.
-- [ ] Avoid duplicate spending by stopping/cleaning up via the existing stuck-task recovery path; do not auto-fork/retry/resume.
-- [ ] Add focused unit tests for detector logic and recovery behavior.
-- [ ] Add or update env documentation only where repo conventions require operational env examples.
-- [ ] Run focused tests and the required quality checks.
+- [x] Add pure detector logic in `apps/api/src/scheduled/stuck-tasks.ts` or a small sibling module so tests can cover marker matching without D1/DO setup.
+- [x] In `recoverStuckTasks`, for active `in_progress` Claude Code tasks, resolve the task session and inspect recent text messages via ProjectData.
+- [x] Detect repeated `Compacting...` / `Compacting completed` marker evidence in a rolling recent-message window.
+- [x] On detection, fail the task visibly with a diagnostic reason, observability context containing marker counts/snippets/session ID, a system `task_status_events` row, trigger execution sync, and cleanup.
+- [x] Avoid duplicate spending by stopping/cleaning up via the existing stuck-task recovery path; do not auto-fork/retry/resume.
+- [x] Add focused unit tests for detector logic and recovery behavior.
+- [x] Add or update env documentation only where repo conventions require operational env examples.
+- [x] Run focused tests and the required quality checks.
 - [ ] Run specialist validation: task completion, Cloudflare/API, env/config, constitution, and test review.
 - [ ] Open a PR on `sam/implement-first-sam-compaction-01kwpw`.
+
+## Validation Notes
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/stuck-tasks.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/recovery-resilience.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
+- `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/scheduled-stuck-tasks.test.ts` did not run tests because the Cloudflare worker pool crashed repeatedly with `workerd` signal 11 / worker exited unexpectedly errors.
 
 ## Acceptance Criteria
 

@@ -33,6 +33,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
+import * as projectDataService from '../services/project-data';
 import { cleanupTaskRun } from '../services/task-runner';
 import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
 
@@ -41,6 +42,18 @@ function parseMs(value: string | undefined, fallback: number): number {
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return parsed;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value == null || value.trim() === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
 /** Human-readable descriptions for execution steps */
@@ -60,10 +73,100 @@ function describeStep(step: string | null): string {
   return STEP_DESCRIPTIONS[step] ?? step;
 }
 
+const DEFAULT_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT = 40;
+const DEFAULT_COMPACTION_LOOP_WINDOW_MESSAGES = 20;
+const DEFAULT_COMPACTION_LOOP_MIN_PAIRS = 3;
+const COMPACTION_START_MARKER = 'Compacting...';
+const COMPACTION_COMPLETED_MARKER = 'Compacting completed';
+const COMPACTION_EVIDENCE_SNIPPET_LIMIT = 6;
+const COMPACTION_EVIDENCE_SNIPPET_CHARS = 160;
+
+export interface CompactionLoopEvidence {
+  detected: boolean;
+  startMarkers: number;
+  completedMarkers: number;
+  markerPairs: number;
+  inspectedMessages: number;
+  windowMessages: number;
+  minPairs: number;
+  snippets: string[];
+}
+
+interface CompactionLoopConfig {
+  enabled: boolean;
+  recentMessageLimit: number;
+  windowMessages: number;
+  minPairs: number;
+}
+
+function getCompactionLoopConfig(env: Env): CompactionLoopConfig {
+  const recentMessageLimit = parsePositiveInt(
+    env.CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT,
+    DEFAULT_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT
+  );
+  const windowMessages = Math.min(
+    recentMessageLimit,
+    parsePositiveInt(
+      env.CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES,
+      DEFAULT_COMPACTION_LOOP_WINDOW_MESSAGES
+    )
+  );
+
+  return {
+    enabled: parseBoolean(env.CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED, true),
+    recentMessageLimit,
+    windowMessages,
+    minPairs: parsePositiveInt(
+      env.CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS,
+      DEFAULT_COMPACTION_LOOP_MIN_PAIRS
+    ),
+  };
+}
+
+export function detectClaudeCodeCompactionLoop(
+  messages: Array<{ role?: unknown; content?: unknown }>,
+  config: { windowMessages: number; minPairs: number }
+): CompactionLoopEvidence {
+  const windowMessages = Math.max(1, Math.min(messages.length, Math.round(config.windowMessages)));
+  const minPairs = Math.max(1, Math.round(config.minPairs));
+  const recentMessages = messages.slice(-windowMessages);
+  let startMarkers = 0;
+  let completedMarkers = 0;
+  const snippets: string[] = [];
+
+  for (const message of recentMessages) {
+    if (typeof message.content !== 'string') continue;
+    const content = message.content;
+    const hasStart = content.includes(COMPACTION_START_MARKER);
+    const hasCompleted = content.includes(COMPACTION_COMPLETED_MARKER);
+    if (!hasStart && !hasCompleted) continue;
+
+    if (hasStart) startMarkers++;
+    if (hasCompleted) completedMarkers++;
+
+    if (snippets.length < COMPACTION_EVIDENCE_SNIPPET_LIMIT) {
+      snippets.push(content.replace(/\s+/g, ' ').slice(0, COMPACTION_EVIDENCE_SNIPPET_CHARS));
+    }
+  }
+
+  const markerPairs = Math.min(startMarkers, completedMarkers);
+  return {
+    detected: markerPairs >= minPairs,
+    startMarkers,
+    completedMarkers,
+    markerPairs,
+    inspectedMessages: messages.length,
+    windowMessages,
+    minPairs,
+    snippets,
+  };
+}
+
 export interface StuckTaskResult {
   failedQueued: number;
   failedDelegated: number;
   failedInProgress: number;
+  failedCompactionLoops: number;
   heartbeatSkipped: number;
   doHealthChecked: number;
   errors: number;
@@ -93,6 +196,88 @@ export interface RecoveryDiagnostics {
     retryCount: number | null;
     lastStepAt: number | null;
   } | null;
+}
+
+interface CompactionLoopRecovery {
+  sessionId: string | null;
+  agentSessionId: string | null;
+  evidence: CompactionLoopEvidence;
+  recentMessageLimit: number;
+}
+
+async function findClaudeCodeAgentSession(
+  env: Env,
+  workspaceId: string | null
+): Promise<{ id: string; agent_type: string | null } | null> {
+  if (!workspaceId) return null;
+
+  return env.DATABASE.prepare(
+    `SELECT id, agent_type
+     FROM agent_sessions
+     WHERE workspace_id = ? AND status = 'running' AND agent_type = 'claude-code'
+     ORDER BY created_at DESC
+     LIMIT 1`
+  ).bind(workspaceId).first<{ id: string; agent_type: string | null }>();
+}
+
+async function resolveTaskSessionId(
+  env: Env,
+  task: { id: string; project_id: string; workspace_id: string | null }
+): Promise<string | null> {
+  if (task.workspace_id) {
+    const workspace = await env.DATABASE.prepare(
+      `SELECT chat_session_id FROM workspaces WHERE id = ?`
+    ).bind(task.workspace_id).first<{ chat_session_id: string | null }>();
+    if (workspace?.chat_session_id) return workspace.chat_session_id;
+  }
+
+  const sessions = await projectDataService.listSessions(env, task.project_id, null, 1, 0, task.id);
+  const firstSession = sessions.sessions[0];
+  return typeof firstSession?.id === 'string' ? firstSession.id : null;
+}
+
+async function detectTaskCompactionLoop(
+  env: Env,
+  task: { id: string; project_id: string; status: string; workspace_id: string | null }
+): Promise<CompactionLoopRecovery | null> {
+  if (task.status !== 'in_progress') return null;
+
+  const config = getCompactionLoopConfig(env);
+  if (!config.enabled) return null;
+
+  const agentSession = await findClaudeCodeAgentSession(env, task.workspace_id);
+  if (!agentSession) return null;
+
+  const sessionId = await resolveTaskSessionId(env, task);
+  if (!sessionId) return null;
+
+  const { messages } = await projectDataService.getMessages(
+    env,
+    task.project_id,
+    sessionId,
+    config.recentMessageLimit,
+    null,
+    ['assistant', 'system', 'tool'],
+    false,
+    'desc'
+  );
+
+  const evidence = detectClaudeCodeCompactionLoop(
+    messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    { windowMessages: config.windowMessages, minPairs: config.minPairs }
+  );
+
+  if (!evidence.detected) return null;
+
+  return {
+    sessionId,
+    agentSessionId: agentSession.id,
+    evidence,
+    recentMessageLimit: config.recentMessageLimit,
+  };
 }
 
 /**
@@ -187,6 +372,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     failedQueued: 0,
     failedDelegated: 0,
     failedInProgress: 0,
+    failedCompactionLoops: 0,
     heartbeatSkipped: 0,
     doHealthChecked: 0,
     errors: 0,
@@ -232,76 +418,109 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     const elapsedMs = now.getTime() - updatedAt;
     let isStuck = false;
     let reason = '';
+    let compactionLoopRecovery: CompactionLoopRecovery | null = null;
 
     const stepInfo = task.execution_step
       ? ` Last step: ${describeStep(task.execution_step)}.`
       : '';
 
-    switch (task.status) {
-      case 'queued':
-        if (elapsedMs > queuedTimeoutMs) {
-          isStuck = true;
-          reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
-        }
-        break;
-      case 'delegated':
-        if (elapsedMs > delegatedTimeoutMs) {
-          isStuck = true;
-          reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
-        }
-        break;
-      case 'in_progress': {
-        const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
-        const executionMs = now.getTime() - startedAt;
-        if (executionMs > maxExecutionMs) {
-          // Hard timeout: absolute ceiling that cannot be bypassed by heartbeat.
-          // Past this point, the task is killed regardless of node health.
-          if (executionMs > hardTimeoutMs) {
+    try {
+      compactionLoopRecovery = await detectTaskCompactionLoop(env, task);
+      if (compactionLoopRecovery) {
+        isStuck = true;
+        reason =
+          `Claude Code compaction loop detected: ${compactionLoopRecovery.evidence.markerPairs} ` +
+          `recent Compacting marker pairs in the last ${compactionLoopRecovery.evidence.windowMessages} ` +
+          `messages (threshold: ${compactionLoopRecovery.evidence.minPairs}). Stopping the task to prevent duplicate token spend.`;
+      }
+    } catch (err) {
+      log.warn('stuck_task.compaction_loop_detection_failed', {
+        taskId: task.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: `Compaction-loop detection failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: 'claude_code_compaction_loop_detection_failure',
+          taskId: task.id,
+          taskStatus: task.status,
+          executionStep: task.execution_step,
+        },
+        userId: task.user_id,
+        workspaceId: task.workspace_id,
+      });
+    }
+
+    if (!isStuck) {
+      switch (task.status) {
+        case 'queued':
+          if (elapsedMs > queuedTimeoutMs) {
             isStuck = true;
-            reason = `Task exceeded hard timeout of ${Math.round(hardTimeoutMs / 60000)} minutes (no heartbeat grace).${stepInfo}`;
-            break;
+            reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
           }
+          break;
+        case 'delegated':
+          if (elapsedMs > delegatedTimeoutMs) {
+            isStuck = true;
+            reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
+          }
+          break;
+        case 'in_progress': {
+          const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
+          const executionMs = now.getTime() - startedAt;
+          if (executionMs > maxExecutionMs) {
+            // Hard timeout: absolute ceiling that cannot be bypassed by heartbeat.
+            // Past this point, the task is killed regardless of node health.
+            if (executionMs > hardTimeoutMs) {
+              isStuck = true;
+              reason = `Task exceeded hard timeout of ${Math.round(hardTimeoutMs / 60000)} minutes (no heartbeat grace).${stepInfo}`;
+              break;
+            }
 
-          // Soft timeout (4h-8h window): check if the VM agent is still alive via heartbeat.
-          // A recent heartbeat means the agent is actively working — allow grace period.
-          const nodeIdToCheck = await getTaskNodeId(env, task);
-          if (nodeIdToCheck) {
-            const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
-            const heartbeatRecent = await isNodeHeartbeatRecent(env, nodeIdToCheck, staleSeconds);
-            if (heartbeatRecent) {
-              log.info('stuck_task.skipped_active_heartbeat', {
-                taskId: task.id,
-                nodeId: nodeIdToCheck,
-                executionMs,
-                maxExecutionMs,
-                hardTimeoutMs,
-              });
-
-              await persistError(env.OBSERVABILITY_DATABASE, {
-                source: 'api',
-                level: 'info',
-                message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
-                context: {
-                  recoveryType: 'stuck_task_heartbeat_skip',
+            // Soft timeout (4h-8h window): check if the VM agent is still alive via heartbeat.
+            // A recent heartbeat means the agent is actively working — allow grace period.
+            const nodeIdToCheck = await getTaskNodeId(env, task);
+            if (nodeIdToCheck) {
+              const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
+              const heartbeatRecent = await isNodeHeartbeatRecent(env, nodeIdToCheck, staleSeconds);
+              if (heartbeatRecent) {
+                log.info('stuck_task.skipped_active_heartbeat', {
                   taskId: task.id,
                   nodeId: nodeIdToCheck,
                   executionMs,
                   maxExecutionMs,
                   hardTimeoutMs,
-                },
-                userId: task.user_id,
-                nodeId: nodeIdToCheck,
-              });
+                });
 
-              result.heartbeatSkipped++;
-              break;
+                await persistError(env.OBSERVABILITY_DATABASE, {
+                  source: 'api',
+                  level: 'info',
+                  message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
+                  context: {
+                    recoveryType: 'stuck_task_heartbeat_skip',
+                    taskId: task.id,
+                    nodeId: nodeIdToCheck,
+                    executionMs,
+                    maxExecutionMs,
+                    hardTimeoutMs,
+                  },
+                  userId: task.user_id,
+                  nodeId: nodeIdToCheck,
+                });
+
+                result.heartbeatSkipped++;
+                break;
+              }
             }
-          }
 
-          isStuck = true;
-          reason = `Task exceeded max execution time of ${Math.round(maxExecutionMs / 60000)} minutes.${stepInfo}`;
+            isStuck = true;
+            reason = `Task exceeded max execution time of ${Math.round(maxExecutionMs / 60000)} minutes.${stepInfo}`;
+          }
+          break;
         }
-        break;
       }
     }
 
@@ -388,6 +607,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         executionStep: task.execution_step,
         elapsedMs,
         reason,
+        recoveryType: compactionLoopRecovery ? 'claude_code_compaction_loop' : 'stuck_task',
+        compactionLoop: compactionLoopRecovery?.evidence,
         workspaceStatus: diagnostics.workspaceStatus,
         nodeStatus: diagnostics.nodeStatus,
         doState: diagnostics.doState,
@@ -399,10 +620,18 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         level: 'warn',
         message: reason,
         context: {
-          recoveryType: 'stuck_task',
+          ...(compactionLoopRecovery
+            ? { recoveryType: 'claude_code_compaction_loop' }
+            : { recoveryType: 'stuck_task' }),
           taskStatus: task.status,
           executionStep: task.execution_step,
           elapsedMs,
+          compactionLoop: compactionLoopRecovery ? {
+            sessionId: compactionLoopRecovery.sessionId,
+            agentSessionId: compactionLoopRecovery.agentSessionId,
+            recentMessageLimit: compactionLoopRecovery.recentMessageLimit,
+            evidence: compactionLoopRecovery.evidence,
+          } : null,
           workspaceId: diagnostics.workspaceId,
           workspaceStatus: diagnostics.workspaceStatus,
           nodeId: diagnostics.nodeId,
@@ -450,6 +679,23 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
       await syncTriggerExecutionStatus(env.DATABASE, task.id, 'failed', reason);
 
+      if (compactionLoopRecovery?.sessionId) {
+        try {
+          await projectDataService.failSession(
+            env,
+            task.project_id,
+            compactionLoopRecovery.sessionId,
+            reason
+          );
+        } catch (sessionErr) {
+          log.warn('stuck_task.compaction_loop_session_fail_failed', {
+            taskId: task.id,
+            sessionId: compactionLoopRecovery.sessionId,
+            error: sessionErr instanceof Error ? sessionErr.message : String(sessionErr),
+          });
+        }
+      }
+
       // Best-effort cleanup: stop workspace and mark auto-provisioned node as warm.
       // cleanupTaskRun reads the task's workspaceId and autoProvisionedNodeId from DB.
       try {
@@ -481,7 +727,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       switch (task.status) {
         case 'queued': result.failedQueued++; break;
         case 'delegated': result.failedDelegated++; break;
-        case 'in_progress': result.failedInProgress++; break;
+        case 'in_progress':
+          result.failedInProgress++;
+          if (compactionLoopRecovery) result.failedCompactionLoops++;
+          break;
       }
     } catch (err) {
       log.error('stuck_task.recovery_failed', {
