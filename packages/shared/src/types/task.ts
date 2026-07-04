@@ -79,6 +79,258 @@ export type TaskActorType = 'user' | 'system' | 'workspace_callback';
 
 export type TaskSortOrder = 'createdAtDesc' | 'updatedAtDesc' | 'priorityDesc';
 
+export const COMPLETION_EVIDENCE_VERIFICATION_KINDS = [
+  'test',
+  'staging',
+  'manual',
+  'ci',
+  'other',
+] as const;
+
+export type CompletionEvidenceVerificationKind =
+  (typeof COMPLETION_EVIDENCE_VERIFICATION_KINDS)[number];
+
+export interface CompletionTestRun {
+  command: string;
+  passed: boolean;
+  detail?: string;
+}
+
+export interface CompletionVerification {
+  kind: CompletionEvidenceVerificationKind;
+  description: string;
+  evidence?: string;
+}
+
+export interface CompletionEvidence {
+  testsRun?: CompletionTestRun[];
+  verifications?: CompletionVerification[];
+  prUrl?: string;
+  notes?: string;
+}
+
+const COMPLETION_EVIDENCE_LIMITS = {
+  maxTestsRun: 25,
+  maxVerifications: 25,
+  maxCommandLength: 500,
+  maxDetailLength: 2000,
+  maxDescriptionLength: 2000,
+  maxEvidenceLength: 2000,
+  maxPrUrlLength: 500,
+  maxNotesLength: 4000,
+} as const;
+
+type CompletionEvidenceValidationResult =
+  | { ok: true; value: CompletionEvidence }
+  | { ok: false; error: string };
+
+type OptionalStringValidationResult =
+  | { ok: true; value?: string }
+  | { ok: false; error: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function optionalTrimmedString(
+  value: unknown,
+  field: string,
+  maxLength: number
+): OptionalStringValidationResult {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== 'string') {
+    return { ok: false, error: `${field} must be a string` };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: false, error: `${field} must not be empty` };
+  }
+  if (trimmed.length > maxLength) {
+    return { ok: false, error: `${field} must be ${maxLength} characters or fewer` };
+  }
+  return { ok: true, value: trimmed };
+}
+
+function validateEvidenceArray<T>(
+  value: unknown,
+  field: string,
+  maxItems: number,
+  parseItem: (item: Record<string, unknown>, index: number) => { ok: true; value: T } | { ok: false; error: string }
+): { ok: true; value: T[] } | { ok: false; error: string } {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: `${field} must be an array` };
+  }
+  if (value.length > maxItems) {
+    return { ok: false, error: `${field} must contain ${maxItems} items or fewer` };
+  }
+
+  const parsed: T[] = [];
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item)) {
+      return { ok: false, error: `${field}[${index}] must be an object` };
+    }
+    const result = parseItem(item, index);
+    if (!result.ok) return result;
+    parsed.push(result.value);
+  }
+  return { ok: true, value: parsed };
+}
+
+function requiredEvidenceString(
+  value: unknown,
+  field: string,
+  maxLength: number
+): { ok: true; value: string } | { ok: false; error: string } {
+  const result = optionalTrimmedString(value, field, maxLength);
+  if (!result.ok) return result;
+  if (!result.value) {
+    return { ok: false, error: `${field} must not be empty` };
+  }
+  return { ok: true, value: result.value };
+}
+
+function validateCompletionTestRun(
+  item: Record<string, unknown>,
+  index: number
+): { ok: true; value: CompletionTestRun } | { ok: false; error: string } {
+  const command = requiredEvidenceString(
+    item.command,
+    `evidence.testsRun[${index}].command`,
+    COMPLETION_EVIDENCE_LIMITS.maxCommandLength
+  );
+  if (!command.ok) return command;
+
+  if (typeof item.passed !== 'boolean') {
+    return { ok: false, error: `evidence.testsRun[${index}].passed must be a boolean` };
+  }
+
+  const detail = optionalTrimmedString(
+    item.detail,
+    `evidence.testsRun[${index}].detail`,
+    COMPLETION_EVIDENCE_LIMITS.maxDetailLength
+  );
+  if (!detail.ok) return detail;
+
+  return {
+    ok: true,
+    value: {
+      command: command.value,
+      passed: item.passed,
+      ...(detail.value ? { detail: detail.value } : {}),
+    },
+  };
+}
+
+function validateCompletionVerification(
+  item: Record<string, unknown>,
+  index: number
+): { ok: true; value: CompletionVerification } | { ok: false; error: string } {
+  if (
+    typeof item.kind !== 'string' ||
+    !(COMPLETION_EVIDENCE_VERIFICATION_KINDS as readonly string[]).includes(item.kind)
+  ) {
+    return {
+      ok: false,
+      error: `evidence.verifications[${index}].kind must be one of: ${COMPLETION_EVIDENCE_VERIFICATION_KINDS.join(', ')}`,
+    };
+  }
+
+  const description = requiredEvidenceString(
+    item.description,
+    `evidence.verifications[${index}].description`,
+    COMPLETION_EVIDENCE_LIMITS.maxDescriptionLength
+  );
+  if (!description.ok) return description;
+
+  const evidence = optionalTrimmedString(
+    item.evidence,
+    `evidence.verifications[${index}].evidence`,
+    COMPLETION_EVIDENCE_LIMITS.maxEvidenceLength
+  );
+  if (!evidence.ok) return evidence;
+
+  return {
+    ok: true,
+    value: {
+      kind: item.kind as CompletionEvidenceVerificationKind,
+      description: description.value,
+      ...(evidence.value ? { evidence: evidence.value } : {}),
+    },
+  };
+}
+
+export function validateCompletionEvidence(value: unknown): CompletionEvidenceValidationResult {
+  if (!isRecord(value)) {
+    return { ok: false, error: 'evidence must be an object' };
+  }
+
+  const output: CompletionEvidence = {};
+  let populatedFields = 0;
+
+  if (value.testsRun !== undefined) {
+    const testsRun = validateEvidenceArray(
+      value.testsRun,
+      'evidence.testsRun',
+      COMPLETION_EVIDENCE_LIMITS.maxTestsRun,
+      validateCompletionTestRun
+    );
+    if (!testsRun.ok) return testsRun;
+    output.testsRun = testsRun.value;
+    populatedFields += 1;
+  }
+
+  if (value.verifications !== undefined) {
+    const verifications = validateEvidenceArray(
+      value.verifications,
+      'evidence.verifications',
+      COMPLETION_EVIDENCE_LIMITS.maxVerifications,
+      validateCompletionVerification
+    );
+    if (!verifications.ok) return verifications;
+    output.verifications = verifications.value;
+    populatedFields += 1;
+  }
+
+  const prUrl = optionalTrimmedString(
+    value.prUrl,
+    'evidence.prUrl',
+    COMPLETION_EVIDENCE_LIMITS.maxPrUrlLength
+  );
+  if (!prUrl.ok) return prUrl;
+  if (prUrl.value) {
+    output.prUrl = prUrl.value;
+    populatedFields += 1;
+  }
+
+  const notes = optionalTrimmedString(
+    value.notes,
+    'evidence.notes',
+    COMPLETION_EVIDENCE_LIMITS.maxNotesLength
+  );
+  if (!notes.ok) return notes;
+  if (notes.value) {
+    output.notes = notes.value;
+    populatedFields += 1;
+  }
+
+  if (populatedFields === 0) {
+    return { ok: false, error: 'evidence must include at least one supported field' };
+  }
+
+  return { ok: true, value: output };
+}
+
+export function parseCompletionEvidenceJson(raw: string | null): CompletionEvidence | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const validation = validateCompletionEvidence(parsed);
+    return validation.ok ? validation.value : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -125,6 +377,7 @@ export interface Task {
   outputSummary: string | null;
   outputBranch: string | null;
   outputPrUrl: string | null;
+  completionEvidence: CompletionEvidence | null;
   finalizedAt: string | null;
   createdAt: string;
   updatedAt: string;
