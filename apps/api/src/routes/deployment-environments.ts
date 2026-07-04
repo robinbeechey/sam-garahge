@@ -2,7 +2,7 @@
  * Deployment environment routes.
  *
  * Scoped under /api/projects/:projectId/environments.
- * Auth: session cookie + project ownership.
+ * Auth: session cookie + active project membership/capabilities.
  */
 
 import { and, eq } from 'drizzle-orm';
@@ -16,7 +16,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas';
 import {
   DEPLOYMENT_ENVIRONMENT_NAME_RE,
@@ -123,8 +123,7 @@ type ResolvedDeploymentNode =
 async function resolveDeploymentNode(
   db: DeploymentDb,
   projectId: string,
-  envId: string,
-  userId: string
+  envId: string
 ): Promise<ResolvedDeploymentNode> {
   const envRows = await db
     .select({
@@ -156,7 +155,7 @@ async function resolveDeploymentNode(
       lastMetrics: schema.nodes.lastMetrics,
     })
     .from(schema.nodes)
-    .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
+    .where(eq(schema.nodes.id, environment.nodeId))
     .limit(1);
 
   const node = nodeRows[0];
@@ -196,9 +195,9 @@ async function handleNodeProxyRoute(
   const envId = c.req.param('envId');
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'deployment:read');
 
-  const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
+  const resolved = await resolveDeploymentNode(db, projectId, envId);
   if (resolved.kind !== 'ready') {
     return c.json(builders.notReady(resolved));
   }
@@ -230,7 +229,7 @@ deploymentEnvironmentRoutes.post(
     const projectId = c.req.param('projectId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
 
     const { name } = c.req.valid('json');
     const now = new Date().toISOString();
@@ -285,7 +284,7 @@ deploymentEnvironmentRoutes.get(
     const projectId = c.req.param('projectId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectAccess(db, projectId, userId);
 
     const rows = await db
       .select()
@@ -314,7 +313,7 @@ deploymentEnvironmentRoutes.get(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectAccess(db, projectId, userId);
 
     const environment = await requireDeploymentEnvironment(db, projectId, envId);
 
@@ -335,7 +334,7 @@ deploymentEnvironmentRoutes.get(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:read');
     const environment = await requireDeploymentEnvironment(db, projectId, envId);
     if (environment.status !== 'active') {
       return c.json({ publicRoutes: [] });
@@ -369,7 +368,7 @@ deploymentEnvironmentRoutes.patch(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
 
     const rows = await db
       .select()
@@ -550,7 +549,7 @@ deploymentEnvironmentRoutes.delete(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
 
     const envRows = await db
       .select()

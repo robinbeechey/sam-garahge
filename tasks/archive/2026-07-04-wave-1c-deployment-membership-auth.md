@@ -30,14 +30,12 @@ Deployment and infrastructure project routes still gate project access through `
 
 ## Implementation Checklist
 
-- [ ] Replace `requireOwnedProject()` imports and calls in the eight scoped route files with `requireProjectAccess()` or `requireProjectCapability()` using route-appropriate capabilities.
-- [ ] Preserve current `userId` usage for created-by/audit fields, OAuth state identity, deployment provisioning, image resolution, node proxy calls, and credential/node service calls.
-- [ ] Update route comments that describe owner-only authorization where touched.
-- [ ] Add focused route tests proving an active admin member can access representative migrated deployment routes and a non-member is rejected.
-- [ ] Run a grep check proving no `requireOwnedProject` usage remains in the eight scoped files.
-- [ ] Run relevant API/unit tests and broader quality gates required by `/do`.
-- [ ] Run specialist reviews required for API/auth/credential-sensitive changes.
-- [ ] Open PR for `sam/wave-1c-migrate-deployment-01kwpm`, wait for CI, perform required staging verification if not blocked, and merge if gates pass.
+- [x] Replace `requireOwnedProject()` imports and calls in the eight scoped route files with `requireProjectAccess()` or `requireProjectCapability()` using route-appropriate capabilities.
+- [x] Preserve current `userId` usage for created-by/audit fields, OAuth state identity, deployment provisioning, image resolution, node proxy calls, and credential/node service calls.
+- [x] Update route comments that describe owner-only authorization where touched.
+- [x] Add focused route tests proving an active admin member can access representative migrated deployment routes and a non-member is rejected.
+- [x] Run a grep check proving no `requireOwnedProject` usage remains in the eight scoped files.
+- [x] Run relevant API/unit tests and broader quality gates required by `/do`.
 
 ## Acceptance Criteria
 
@@ -48,6 +46,21 @@ Deployment and infrastructure project routes still gate project access through `
 - Environment lifecycle, custom domain, volume, destructive environment, and deployment infrastructure management routes use management capabilities.
 - Existing actor/audit/credential attribution remains based on the active session user.
 - No `requireOwnedProject` call sites remain in the eight scoped files.
+
+## Validation Evidence
+
+- Focused route tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/deployment-membership-auth.test.ts tests/unit/routes/deployment-custom-domains.test.ts tests/unit/routes/deployment-volumes.test.ts tests/unit/routes/deployment-release-compose-submission.test.ts tests/unit/routes/deployment-release-provisioning.test.ts tests/unit/routes/deployment-environment-observability.test.ts tests/unit/routes/deployment-environment-lifecycle-vertical.test.ts tests/unit/routes/deployment-custom-domains-vertical.test.ts tests/unit/routes/project-deployment.test.ts` (9 files, 73 tests).
+- Scoped grep check passed: no `requireOwnedProject` matches in the eight scoped route files.
+- Review fix added coverage proving an admin member can read deployment logs from an owner-created deployment node without reintroducing a `nodes.userId = active user` project-access boundary.
+- `pnpm lint` passed with existing warnings only.
+- `pnpm typecheck` passed.
+- `pnpm test` passed: turbo 19/19 tasks successful, including API 367 files / 5688 tests and web 206 files / 2548 tests.
+- `pnpm build` passed.
+- `$task-completion-validator` passed before archive: research findings map to checklist items, checked items map to the diff, acceptance criteria have automated or command evidence, no UI data path applies, no new multi-resource selector applies, and the route-level test provides vertical coverage for membership authorization.
+
+## Workflow Notes
+
+- Specialist reviews, PR creation, CI, staging verification, merge, and cleanup are tracked in `.do-state.md` per the `/do` workflow after this implementation task is archived.
 
 ## References
 
