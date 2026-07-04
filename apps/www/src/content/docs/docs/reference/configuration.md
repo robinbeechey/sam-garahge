@@ -187,6 +187,10 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `TASK_RUN_MAX_EXECUTION_MS`                | `14400000` (4 hr)  | Max task execution time                                                               |
 | `TASK_STUCK_QUEUED_TIMEOUT_MS`             | `600000` (10 min)  | Timeout for tasks stuck in queued state                                               |
 | `TASK_STUCK_DELEGATED_TIMEOUT_MS`          | `1860000` (31 min) | Timeout for tasks stuck in delegated state                                            |
+| `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED` | `true`        | Enable Claude Code compaction-loop shutdown from recent message evidence              |
+| `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`      | Recent task-session messages to inspect for compaction-loop evidence                  |
+| `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES` | `20`          | Rolling recent-message window used for compaction-loop detection                      |
+| `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`    | `3`                | Minimum `Compacting...` / `Compacting completed` marker pairs before failing a task   |
 | `TASK_CALLBACK_TIMEOUT_MS`                 | `10000`            | Callback response timeout                                                             |
 | `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`         | `3`                | Max callback retry attempts                                                           |
 | `TASK_RUN_CLEANUP_DELAY_MS`                | `5000`             | Delay before task cleanup                                                             |

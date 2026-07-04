@@ -9,7 +9,9 @@
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
-import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { detectClaudeCodeCompactionLoop, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { persistError } from '../../src/services/observability';
+import { cleanupTaskRun } from '../../src/services/task-runner';
 
 // Mock cleanupTaskRun
 vi.mock('../../src/services/task-runner', () => ({
@@ -20,6 +22,15 @@ vi.mock('../../src/services/task-runner', () => ({
 vi.mock('../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
 }));
+
+const { projectDataMocks } = vi.hoisted(() => ({
+  projectDataMocks: {
+    getMessages: vi.fn(),
+    listSessions: vi.fn(),
+    failSession: vi.fn(),
+  },
+}));
+vi.mock('../../src/services/project-data', () => projectDataMocks);
 
 // Mock trigger execution sync
 const { syncTriggerExecutionMock } = vi.hoisted(() => ({
@@ -96,6 +107,179 @@ function createMockEnv(
 describe('recoverStuckTasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    projectDataMocks.getMessages.mockResolvedValue({ messages: [], hasMore: false });
+    projectDataMocks.listSessions.mockResolvedValue({ sessions: [], total: 0 });
+    projectDataMocks.failSession.mockResolvedValue(undefined);
+  });
+
+  describe('detectClaudeCodeCompactionLoop', () => {
+    it('detects repeated compaction marker pairs in the recent window', () => {
+      const evidence = detectClaudeCodeCompactionLoop(
+        [
+          { role: 'assistant', content: 'Working normally' },
+          { role: 'system', content: 'Compacting...' },
+          { role: 'system', content: 'Compacting completed' },
+          { role: 'system', content: 'Compacting...' },
+          { role: 'system', content: 'Compacting completed' },
+          { role: 'system', content: 'Compacting...' },
+          { role: 'system', content: 'Compacting completed' },
+        ],
+        { windowMessages: 6, minPairs: 3 },
+      );
+
+      expect(evidence.detected).toBe(true);
+      expect(evidence.markerPairs).toBe(3);
+      expect(evidence.snippets.length).toBeGreaterThan(0);
+    });
+
+    it('does not detect partial or sparse marker evidence', () => {
+      const evidence = detectClaudeCodeCompactionLoop(
+        [
+          { role: 'system', content: 'Compacting...' },
+          { role: 'assistant', content: 'I made progress after compaction.' },
+          { role: 'system', content: 'Compacting completed' },
+        ],
+        { windowMessages: 3, minPairs: 2 },
+      );
+
+      expect(evidence.detected).toBe(false);
+      expect(evidence.markerPairs).toBe(1);
+    });
+  });
+
+  describe('Claude Code compaction-loop recovery', () => {
+    it('fails an active Claude Code task when recent session messages show repeated compaction markers', async () => {
+      const now = Date.now();
+      const recent = new Date(now - 30 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-compaction-loop',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: recent,
+            started_at: recent,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('FROM agent_sessions', {
+        results: [{ id: 'agent-session-1', agent_type: 'claude-code' }],
+      });
+      responses.set('chat_session_id FROM workspaces', {
+        results: [{ chat_session_id: 'chat-session-1' }],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      responses.set('UPDATE tasks SET status = \'failed\'', {
+        results: [],
+        changes: 1,
+      });
+      projectDataMocks.getMessages.mockResolvedValue({
+        messages: [
+          { role: 'system', content: 'Compacting...', createdAt: 1 },
+          { role: 'system', content: 'Compacting completed', createdAt: 2 },
+          { role: 'system', content: 'Compacting...', createdAt: 3 },
+          { role: 'system', content: 'Compacting completed', createdAt: 4 },
+          { role: 'system', content: 'Compacting...', createdAt: 5 },
+          { role: 'system', content: 'Compacting completed', createdAt: 6 },
+        ],
+        hasMore: false,
+      });
+
+      const env = createMockEnv(responses, {
+        CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS: '3',
+        CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES: '10',
+      });
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedCompactionLoops).toBe(1);
+      expect(result.failedInProgress).toBe(1);
+      expect(projectDataMocks.getMessages).toHaveBeenCalledWith(
+        env,
+        'proj-1',
+        'chat-session-1',
+        40,
+        null,
+        ['assistant', 'system', 'tool'],
+        false,
+        'desc',
+      );
+      expect(projectDataMocks.failSession).toHaveBeenCalledWith(
+        env,
+        'proj-1',
+        'chat-session-1',
+        expect.stringContaining('Claude Code compaction loop detected'),
+      );
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-compaction-loop',
+        'failed',
+        expect.stringContaining('Claude Code compaction loop detected'),
+      );
+      expect(cleanupTaskRun).toHaveBeenCalledWith('task-compaction-loop', env);
+      expect(persistError).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({
+          source: 'api',
+          level: 'warn',
+          message: expect.stringContaining('Claude Code compaction loop detected'),
+          context: expect.objectContaining({
+            recoveryType: 'claude_code_compaction_loop',
+            compactionLoop: expect.objectContaining({
+              sessionId: 'chat-session-1',
+              agentSessionId: 'agent-session-1',
+              recentMessageLimit: 40,
+              evidence: expect.objectContaining({
+                detected: true,
+                markerPairs: 3,
+                snippets: expect.arrayContaining([expect.stringContaining('Compacting')]),
+              }),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('does not fail a fresh in-progress task without a running Claude Code agent session', async () => {
+      const recent = new Date(Date.now() - 30 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-opencode',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: recent,
+            started_at: recent,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: null,
+          },
+        ],
+      });
+      responses.set('FROM agent_sessions', {
+        results: [],
+      });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedCompactionLoops).toBe(0);
+      expect(result.failedInProgress).toBe(0);
+      expect(projectDataMocks.getMessages).not.toHaveBeenCalled();
+      expect(projectDataMocks.failSession).not.toHaveBeenCalled();
+    });
   });
 
   describe('heartbeat-aware in_progress recovery', () => {
@@ -513,6 +697,7 @@ describe('recoverStuckTasks', () => {
         failedQueued: 0,
         failedDelegated: 0,
         failedInProgress: 0,
+        failedCompactionLoops: 0,
         heartbeatSkipped: 0,
         doHealthChecked: 0,
         errors: 0,

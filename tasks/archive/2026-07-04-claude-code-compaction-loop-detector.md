@@ -27,21 +27,41 @@ SAM-managed Claude Code sessions can enter repeated `Compacting...` / `Compactin
 
 ## Implementation Checklist
 
-- [ ] Add configurable compaction-loop thresholds to the API env shape and defaults local to the detector:
+- [x] Add configurable compaction-loop thresholds to the API env shape and defaults local to the detector:
   - enable flag: `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`
   - recent message limit/window: `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT`
   - minimum marker pairs: `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`
   - maximum messages between markers if needed: `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`
-- [ ] Add pure detector logic in `apps/api/src/scheduled/stuck-tasks.ts` or a small sibling module so tests can cover marker matching without D1/DO setup.
-- [ ] In `recoverStuckTasks`, for active `in_progress` Claude Code tasks, resolve the task session and inspect recent text messages via ProjectData.
-- [ ] Detect repeated `Compacting...` / `Compacting completed` marker evidence in a rolling recent-message window.
-- [ ] On detection, fail the task visibly with a diagnostic reason, observability context containing marker counts/snippets/session ID, a system `task_status_events` row, trigger execution sync, and cleanup.
-- [ ] Avoid duplicate spending by stopping/cleaning up via the existing stuck-task recovery path; do not auto-fork/retry/resume.
-- [ ] Add focused unit tests for detector logic and recovery behavior.
-- [ ] Add or update env documentation only where repo conventions require operational env examples.
-- [ ] Run focused tests and the required quality checks.
-- [ ] Run specialist validation: task completion, Cloudflare/API, env/config, constitution, and test review.
+- [x] Add pure detector logic in `apps/api/src/scheduled/stuck-tasks.ts` or a small sibling module so tests can cover marker matching without D1/DO setup.
+- [x] In `recoverStuckTasks`, for active `in_progress` Claude Code tasks, resolve the task session and inspect recent text messages via ProjectData.
+- [x] Detect repeated `Compacting...` / `Compacting completed` marker evidence in a rolling recent-message window.
+- [x] On detection, fail the task visibly with a diagnostic reason, observability context containing marker counts/snippets/session ID, a system `task_status_events` row, trigger execution sync, and cleanup.
+- [x] Avoid duplicate spending by stopping/cleaning up via the existing stuck-task recovery path; do not auto-fork/retry/resume.
+- [x] Add focused unit tests for detector logic and recovery behavior.
+- [x] Add or update env documentation only where repo conventions require operational env examples.
+- [x] Run focused tests and the required quality checks.
+- [x] Run specialist validation: task completion, Cloudflare/API, env/config, constitution, and test review.
 - [ ] Open a PR on `sam/implement-first-sam-compaction-01kwpw`.
+
+## Validation Notes
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/stuck-tasks.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/recovery-resilience.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
+- `pnpm test` passed.
+- `pnpm build` passed.
+- `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/scheduled-stuck-tasks.test.ts` did not run tests because the Cloudflare worker pool crashed repeatedly with `workerd` signal 11 / worker exited unexpectedly errors.
+- Staging deploy run `28711899218` passed, including Cloudflare deploy health check and smoke tests.
+
+## Specialist Validation
+
+- Task completion validator: PASS. Research findings, checklist items, and acceptance criteria are covered by the diff and validation notes. The only gap is worker vertical-slice execution, documented as an infrastructure crash before test execution.
+- Cloudflare specialist: PASS with warning. No wrangler, D1 schema, migration, KV, or R2 changes. The scheduled Worker path uses existing D1 and ProjectData DO service boundaries. Miniflare worker-pool validation is blocked by `workerd` signal 11.
+- Env validator: PASS. New optional Worker env vars are in `Env`, `.env.example`, and the public configuration reference. No GitHub `GH_*` / Worker `GITHUB_*` prefix issue applies.
+- Constitution validator: PASS. Detector thresholds and limits use env overrides with defaults. Marker literals and bounded evidence snippet constants are protocol/evidence constants, not deployment-specific config.
+- Test engineer: PASS with warning. Pure detector tests and a cron recovery test cover positive, partial-evidence negative, and non-Claude/non-running negative paths; the positive recovery test asserts ProjectData reads, task/session failure, trigger sync, cleanup, and observability evidence. Worker-pool scheduled test could not execute due the `workerd` crash noted above.
+- Doc sync validator: PASS. New user-tunable task recovery env vars are documented where matching task runtime settings already live: `.env.example` and `apps/www/src/content/docs/docs/reference/configuration.md`.
 
 ## Acceptance Criteria
 
