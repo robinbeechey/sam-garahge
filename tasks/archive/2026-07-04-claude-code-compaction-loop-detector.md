@@ -40,7 +40,7 @@ SAM-managed Claude Code sessions can enter repeated `Compacting...` / `Compactin
 - [x] Add focused unit tests for detector logic and recovery behavior.
 - [x] Add or update env documentation only where repo conventions require operational env examples.
 - [x] Run focused tests and the required quality checks.
-- [ ] Run specialist validation: task completion, Cloudflare/API, env/config, constitution, and test review.
+- [x] Run specialist validation: task completion, Cloudflare/API, env/config, constitution, and test review.
 - [ ] Open a PR on `sam/implement-first-sam-compaction-01kwpw`.
 
 ## Validation Notes
@@ -52,6 +52,15 @@ SAM-managed Claude Code sessions can enter repeated `Compacting...` / `Compactin
 - `pnpm test` passed.
 - `pnpm build` passed.
 - `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/scheduled-stuck-tasks.test.ts` did not run tests because the Cloudflare worker pool crashed repeatedly with `workerd` signal 11 / worker exited unexpectedly errors.
+
+## Specialist Validation
+
+- Task completion validator: PASS. Research findings, checklist items, and acceptance criteria are covered by the diff and validation notes. The only gap is worker vertical-slice execution, documented as an infrastructure crash before test execution.
+- Cloudflare specialist: PASS with warning. No wrangler, D1 schema, migration, KV, or R2 changes. The scheduled Worker path uses existing D1 and ProjectData DO service boundaries. Miniflare worker-pool validation is blocked by `workerd` signal 11.
+- Env validator: PASS. New optional Worker env vars are in `Env`, `.env.example`, and the public configuration reference. No GitHub `GH_*` / Worker `GITHUB_*` prefix issue applies.
+- Constitution validator: PASS. Detector thresholds and limits use env overrides with defaults. Marker literals and bounded evidence snippet constants are protocol/evidence constants, not deployment-specific config.
+- Test engineer: PASS with warning. Pure detector tests and a cron recovery test cover positive, partial-evidence negative, and non-Claude/non-running negative paths; the positive recovery test asserts ProjectData reads, task/session failure, trigger sync, cleanup, and observability evidence. Worker-pool scheduled test could not execute due the `workerd` crash noted above.
+- Doc sync validator: PASS. New user-tunable task recovery env vars are documented where matching task runtime settings already live: `.env.example` and `apps/www/src/content/docs/docs/reference/configuration.md`.
 
 ## Acceptance Criteria
 
