@@ -20,6 +20,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
+import * as v from 'valibot';
 
 import { DEPLOYMENT_CONFIG } from './config.js';
 import type {
@@ -43,15 +44,17 @@ const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+const recordSchema = v.custom<Record<string, unknown>>(
+  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  'Expected an object'
+);
 
 function requireRecord(value: unknown, path: string): Record<string, unknown> {
-  if (!isRecord(value)) {
+  const result = v.safeParse(recordSchema, value);
+  if (!result.success) {
     throw new Error(`${path} must be an object`);
   }
-  return value;
+  return result.output;
 }
 
 function requireString(value: unknown, path: string): string {
@@ -61,8 +64,9 @@ function requireString(value: unknown, path: string): string {
   return value;
 }
 
-function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
-  if (!isRecord(value)) {
+export function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
+  const result = v.safeParse(recordSchema, value);
+  if (!result.success) {
     throw new Error(`${path} must be a TOML table`);
   }
   return value as TOML.JsonMap;
