@@ -13,6 +13,7 @@ This PR covers the first implementation slice only:
 - Add GitLab OAuth app config to platform config resolution.
 - Add optional env fallbacks for lockout/manual deployments.
 - Add setup/admin API parsing, validation, and status reporting.
+- Add the minimum GitLab login-provider wiring needed so GitLab-only setup does not complete into a lockout state.
 - Add setup/admin UI fields for GitLab OAuth.
 - Update public self-hosting/configuration/security docs.
 - Add focused tests.
@@ -42,17 +43,18 @@ Out of scope for this WIP PR:
 
 ## Implementation Checklist
 
-- [ ] Extend API env typing and `.env.example` for optional `GITLAB_HOST`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`.
-- [ ] Extend `ResolvedPlatformConfig`, `PlatformConfigStatus`, and `PlatformIntegrationInput` with `gitlab`.
-- [ ] Store GitLab host/client ID in `platform_settings`; store client secret in encrypted `platform_credentials`.
-- [ ] Add `getGitLabOAuthConfig(env)` with runtime-first/env-fallback resolution.
-- [ ] Extend platform config validation for GitLab host/client fields.
-- [ ] Extend setup/admin route parsing for GitLab input.
-- [ ] Extend login provider status response with `gitlab`.
-- [ ] Extend admin/setup web API types and platform config form UI.
-- [ ] Update public docs for optional GitLab config fallbacks and runtime config.
-- [ ] Add/extend tests.
-- [ ] Run UI visual audit for changed platform config form.
+- [x] Extend API env typing and `.env.example` for optional `GITLAB_HOST`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`.
+- [x] Extend `ResolvedPlatformConfig`, `PlatformConfigStatus`, and `PlatformIntegrationInput` with `gitlab`.
+- [x] Store GitLab host/client ID in `platform_settings`; store client secret in encrypted `platform_credentials`.
+- [x] Add `getGitLabOAuthConfig(env)` with runtime-first/env-fallback resolution.
+- [x] Extend platform config validation for GitLab host/client fields.
+- [x] Extend setup/admin route parsing for GitLab input.
+- [x] Extend login provider status response with `gitlab`.
+- [x] Wire GitLab into BetterAuth and login surfaces so configured GitLab OAuth is usable for sign-in.
+- [x] Extend admin/setup web API types and platform config form UI.
+- [x] Update public docs for optional GitLab config fallbacks and runtime config.
+- [x] Add/extend tests.
+- [x] Run UI visual audit for changed platform config form.
 
 ## Acceptance Criteria
 

@@ -10,7 +10,7 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
-import { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } from './services/platform-config';
+import { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } from './services/platform-config';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 const log = createModuleLogger('auth');
@@ -193,7 +193,6 @@ export function selectPrimaryGitHubEmail(
 
 /**
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
- * Uses GitHub OAuth as the social provider.
  */
 export async function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
@@ -201,6 +200,7 @@ export async function createAuth(env: Env) {
   const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
   const githubOAuth = await getGitHubOAuthConfig(env);
   const googleOAuth = await getGoogleLoginOAuthConfig(env);
+  const gitlabOAuth = await getGitLabOAuthConfig(env);
   const socialProviders: Record<string, unknown> = {};
   const trustedProviders: string[] = [];
 
@@ -289,6 +289,17 @@ export async function createAuth(env: Env) {
       clientId: googleOAuth.clientId,
       clientSecret: googleOAuth.clientSecret,
       scope: ['openid', 'email', 'profile'],
+      overrideUserInfoOnSignIn: true,
+    };
+  }
+
+  if (gitlabOAuth) {
+    trustedProviders.push('gitlab');
+    socialProviders.gitlab = {
+      clientId: gitlabOAuth.clientId,
+      clientSecret: gitlabOAuth.clientSecret,
+      issuer: gitlabOAuth.host,
+      scope: ['read_user'],
       overrideUserInfoOnSignIn: true,
     };
   }

@@ -70,6 +70,9 @@ export interface Env {
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
+  GITLAB_HOST?: string; // Optional GitLab OAuth host fallback, e.g. https://gitlab.com
+  GITLAB_CLIENT_ID?: string;
+  GITLAB_CLIENT_SECRET?: string;
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
   CF_ACCOUNT_ID: string;

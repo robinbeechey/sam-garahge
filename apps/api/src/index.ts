@@ -569,12 +569,13 @@ app.get('/api/config/artifacts-enabled', (c) => {
 // only render a provider button when that provider is actually usable. Google
 // here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
 app.get('/api/config/login-providers', async (c) => {
-  const { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } = await import('./services/platform-config');
-  const [github, google] = await Promise.all([
+  const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } = await import('./services/platform-config');
+  const [github, google, gitlab] = await Promise.all([
     getGitHubOAuthConfig(c.env),
     getGoogleLoginOAuthConfig(c.env),
+    getGitLabOAuthConfig(c.env),
   ]);
-  return c.json({ github: github !== null, google: google !== null });
+  return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
 });
 
 // JWKS endpoint (must be at root level)

@@ -32,6 +32,9 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 | `GITHUB_APP_PRIVATE_KEY`                   | Optional fallback GitHub App private key (PEM or base64); runtime admin config takes precedence                 |
 | `GITHUB_APP_SLUG`                          | Optional fallback GitHub App URL slug; runtime admin config takes precedence                                    |
 | `GITHUB_WEBHOOK_SECRET`                    | Optional fallback GitHub App webhook HMAC secret; runtime admin config takes precedence                         |
+| `GITLAB_HOST`                              | Optional fallback GitLab OAuth host, such as `https://gitlab.com`; runtime admin config takes precedence        |
+| `GITLAB_CLIENT_ID`                         | Optional fallback GitLab OAuth application ID; runtime admin config takes precedence                            |
+| `GITLAB_CLIENT_SECRET`                     | Optional fallback GitLab OAuth secret; runtime admin config takes precedence                                    |
 | `TRIAL_CLAIM_TOKEN_SECRET`                 | Trial onboarding HMAC secret (auto-generated)                                                                  |
 
 ## Worker Variables
@@ -61,7 +64,7 @@ Set in GitHub Settings → Environments → production:
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
 
-Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`), the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`), and GitLab OAuth secrets (`GITLAB_HOST`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. Runtime admin config in D1 is resolved first, then these environment fallbacks, then unset.
