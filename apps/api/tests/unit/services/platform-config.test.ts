@@ -172,6 +172,25 @@ describe('platform config resolver', () => {
     expect(config.google.clientSecret).toMatchObject({ value: 'runtime-google-secret', source: 'runtime' });
     expect(config.gitlab.host).toMatchObject({ value: 'https://gitlab.runtime.example.com/', source: 'runtime' });
     expect(config.gitlab.clientSecret).toMatchObject({ value: 'runtime-gitlab-secret', source: 'runtime' });
+
+    const secretRow = await env.DATABASE.prepare(
+      `SELECT provider, credential_kind AS credentialKind, encrypted_token AS encryptedToken, is_enabled AS isEnabled
+       FROM platform_credentials
+       WHERE credential_type = 'platform-integration' AND provider = 'gitlab'`
+    ).first<{
+      provider: string;
+      credentialKind: string;
+      encryptedToken: string;
+      isEnabled: number;
+    }>();
+    expect(secretRow).toMatchObject({
+      provider: 'gitlab',
+      credentialKind: 'gitlab.clientSecret',
+      isEnabled: 1,
+    });
+    expect(secretRow?.encryptedToken).not.toBe('runtime-gitlab-secret');
+    expect(secretRow?.encryptedToken).not.toContain('runtime-gitlab-secret');
+
     await expect(getGitLabOAuthConfig(env)).resolves.toEqual({
       host: 'https://gitlab.runtime.example.com',
       apiBaseUrl: 'https://gitlab.runtime.example.com/api/v4',
