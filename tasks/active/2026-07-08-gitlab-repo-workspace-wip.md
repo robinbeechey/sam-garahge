@@ -6,10 +6,14 @@ Active WIP stacked PR branch on top of #1545 (`sam/gitlab-platform-config-wip`).
 
 ## Constraints
 
-- Draft/WIP PR only.
-- Do not deploy to staging.
-- Do not mutate staging.
-- Do not merge.
+- DRAFT PR. DO NOT MARK READY. DO NOT MERGE.
+- DO NOT DEPLOY TO STAGING, DO NOT RUN STAGING VERIFICATION, AND DO NOT MUTATE STAGING. Other agents are actively using staging.
+- Skip /do Phase 6 by explicit user instruction and document that staging was intentionally skipped.
+- Stop /do Phase 7 after updating the draft PR and observing/reporting CI; never merge.
+- Do not commit a task file directly to main. Keep task records/state on this existing feature branch because the stack is intentionally unmerged.
+- Avoid force-push unless absolutely unavoidable; preserve linear stacked ancestry with normal branch merges.
+- Do not alter or merge PR #1545; consume its published branch head only.
+- Do not create, update, or deploy any staging environment.
 - Use the platform-level GitLab OAuth configuration added in the base PR.
 
 ## Context
@@ -92,6 +96,13 @@ The linked SAM idea is `01KV7ZFD6HZS5N7J45VA798KN1`, "GitLab integration using p
 - Project onboarding Playwright audit passes on iPhone SE and desktop viewports.
 - Full `packages/vm-agent/internal/server` Go package test passes after installing Docker locally and running `dockerd` on `/tmp/sam-docker.sock`.
 - Staging validation is intentionally skipped by user instruction.
+- Refreshed onto foundation SHA `570f4a5090fe05e5b382b585cd2ea8be5ec0d2be` with merge commit `e06e820b2`.
+- Renumbered the GitLab sidecar migration from stale slot `0088` to additive slot `0091`.
+- Added route-level tests for GitLab workspace token exchange, exact identity drift rejection, and task/project access re-verification.
+- Full repository typecheck passed. The exhaustive test run passed 402/403 API files and 5,905/5,906 API tests before exposing one stale provider-count assertion; the repaired provider contract and all focused GitLab boundary tests pass.
+- Full repository build passed.
+- Full VM-agent `go test -race ./...`, touched-package coverage, and `go vet ./...` passed on Go 1.25.0.
+- Local mocked Playwright audit passed 10/10 across iPhone SE (375x667) and desktop (1280x800).
 
 ## Review Notes
 

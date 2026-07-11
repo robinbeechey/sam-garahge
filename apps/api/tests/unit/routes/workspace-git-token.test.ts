@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   assertRepositoryAccess: vi.fn(),
   verifyWorkspaceCallbackAuth: vi.fn(),
   backfillProjectGithubRepoId: vi.fn(),
+  getProjectGitLabRepository: vi.fn(),
+  requireGitLabUserAccessTokenForOwner: vi.fn(),
+  verifyGitLabProjectAccess: vi.fn(),
   and: vi.fn((...clauses: unknown[]) => ({ op: 'and', clauses })),
   eq: vi.fn((left: unknown, right: unknown) => ({ op: 'eq', left, right })),
 }));
@@ -61,6 +64,11 @@ vi.mock('../../../src/services/github-cli-policy', () => {
 });
 vi.mock('../../../src/services/github-repo-id-backfill', () => ({
   backfillProjectGithubRepoId: mocks.backfillProjectGithubRepoId,
+}));
+vi.mock('../../../src/services/gitlab', () => ({
+  getProjectGitLabRepository: mocks.getProjectGitLabRepository,
+  requireGitLabUserAccessTokenForOwner: mocks.requireGitLabUserAccessTokenForOwner,
+  verifyGitLabProjectAccess: mocks.verifyGitLabProjectAccess,
 }));
 
 describe('workspace git-token GitHub scoping', () => {
@@ -175,6 +183,23 @@ describe('workspace git-token GitHub scoping', () => {
       token: 'github-installation-token',
       expiresAt: '2026-06-06T19:00:00.000Z',
     });
+    mocks.getProjectGitLabRepository.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
+    });
+    mocks.requireGitLabUserAccessTokenForOwner.mockResolvedValue('gitlab-oauth-token');
+    mocks.verifyGitLabProjectAccess.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
+    });
 
     const makeSelectBuilder = () => {
       let whereClause: unknown = null;
@@ -215,6 +240,64 @@ describe('workspace git-token GitHub scoping', () => {
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
     app.route('/ws', runtimeRoutes);
+  });
+
+  it('returns host/path-constrained GitLab credentials after re-verifying project access', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      provider: 'gitlab',
+      token: 'gitlab-oauth-token',
+      expiresAt: null,
+      cloneUrl: 'https://gitlab.example.com/group/project.git',
+      host: 'gitlab.example.com',
+      username: 'oauth2',
+      repositoryPath: 'group/project',
+    });
+    expect(mocks.verifyGitLabProjectAccess).toHaveBeenCalledWith(
+      mockEnv,
+      'gitlab-oauth-token',
+      123
+    );
+    expect(mocks.getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects GitLab token exchange when re-verified repository identity drifts', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.verifyGitLabProjectAccess.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'other/project',
+      webUrl: 'https://gitlab.example.com/other/project',
+      httpUrlToRepo: 'https://gitlab.example.com/other/project.git',
+      defaultBranch: 'main',
+    });
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    expect(mocks.getInstallationToken).not.toHaveBeenCalled();
   });
 
   it('returns Artifacts token expiry from camelCase binding shape', async () => {
