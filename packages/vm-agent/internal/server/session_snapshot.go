@@ -674,21 +674,21 @@ func (s *Server) downloadAndRestoreWIP(ctx context.Context, downloadPath, token 
 	defer os.Remove(tmpPath)
 	heads, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "list-heads", tmpPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("list snapshot bundle heads: %w: %s", err, heads)
 	}
 	fields := strings.Fields(heads)
 	if len(fields) < 2 {
 		return fmt.Errorf("snapshot bundle has no restorable ref")
 	}
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, fields[1]); err != nil {
-		return err
+	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, fields[1]); err != nil {
+		return fmt.Errorf("fetch snapshot bundle: %w: %s", err, output)
 	}
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", "--reset", "-u", "FETCH_HEAD"); err != nil {
-		return err
+	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", "--reset", "-u", "FETCH_HEAD"); err != nil {
+		return fmt.Errorf("materialize snapshot tree: %w: %s", err, output)
 	}
 	if strings.TrimSpace(baseCommit) != "" {
-		if _, err := runStandaloneGitCommand(ctx, workDir, nil, "reset", "--mixed", baseCommit); err != nil {
-			return err
+		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "reset", "--mixed", baseCommit); err != nil {
+			return fmt.Errorf("restore snapshot base commit: %w: %s", err, output)
 		}
 	}
 	return nil

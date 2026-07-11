@@ -363,6 +363,18 @@ export class VmAgentContainer extends Container<Env> {
       await this.markWakeDegraded(config, restoreBody || `restore failed with HTTP ${restoreResponse.status}`);
       return { ok: false, message: restoreBody || 'Session restore failed.' };
     }
+    let restoreStatus = '';
+    try {
+      const parsed = JSON.parse(restoreBody) as { status?: unknown };
+      restoreStatus = typeof parsed.status === 'string' ? parsed.status : '';
+    } catch {
+      // A successful restore must provide an explicit machine-readable status.
+    }
+    if (restoreStatus !== 'restored') {
+      const message = restoreBody || 'Session restore did not report restored status.';
+      await this.markWakeDegraded(config, message);
+      return { ok: false, message };
+    }
 
     const now = new Date().toISOString();
     await db.update(schema.nodes).set({
