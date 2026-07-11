@@ -2,12 +2,18 @@ package server
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 func TestCreateHomeTarExcludesCachesAndRecordsOversizedFiles(t *testing.T) {
@@ -79,6 +85,42 @@ func TestCreateWIPBundleDegradesDuringMerge(t *testing.T) {
 	}
 }
 
+func TestDownloadAndExtractTarRejectsPathTraversal(t *testing.T) {
+	home := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	absolute := filepath.Join(t.TempDir(), "absolute.txt")
+	t.Setenv("HOME", home)
+
+	var tarBody bytes.Buffer
+	tw := tar.NewWriter(&tarBody)
+	writeTarFile(t, tw, "session.jsonl", "inside")
+	writeTarFile(t, tw, "../outside.txt", "outside")
+	writeTarFile(t, tw, absolute, "absolute")
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(tarBody.Bytes())
+	}))
+	defer server.Close()
+
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	if err := s.downloadAndExtractTar(context.Background(), "/artifact", "token", time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(home, "session.jsonl")); err != nil || string(got) != "inside" {
+		t.Fatalf("inside file = %q, %v; want inside", got, err)
+	}
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("outside file stat err = %v, want not exist", err)
+	}
+	if _, err := os.Stat(absolute); !os.IsNotExist(err) {
+		t.Fatalf("absolute file stat err = %v, want not exist", err)
+	}
+}
+
 func tarNames(t *testing.T, path string) []string {
 	t.Helper()
 	f, err := os.Open(path)
@@ -106,6 +148,20 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
+
+func writeTarFile(t *testing.T, tw *tar.Writer, name, body string) {
+	t.Helper()
+	if err := tw.WriteHeader(&tar.Header{
+		Name: name,
+		Mode: 0o600,
+		Size: int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(body)); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -13,6 +13,7 @@ export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
 export const DEFAULT_SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES = 100 * 1024 * 1024;
 export const DEFAULT_SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES = 50 * 1024 * 1024;
 export const DEFAULT_SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS = 30_000;
+export const DEFAULT_SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES = 256 * 1024;
 export const DEFAULT_SESSION_SNAPSHOT_R2_PREFIX = 'session-snapshots';
 
 export type SessionSnapshotArtifact = 'home' | 'wip' | 'manifest';
@@ -44,6 +45,7 @@ export interface SessionSnapshotConfig {
   totalBudgetBytes: number;
   entryThresholdBytes: number;
   transferIdleTimeoutMs: number;
+  jsonBodyMaxBytes: number;
   r2Prefix: string;
 }
 
@@ -86,6 +88,10 @@ export function getSessionSnapshotConfig(env: Env): SessionSnapshotConfig {
     transferIdleTimeoutMs: parsePositiveInt(
       env.SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS,
       DEFAULT_SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS
+    ),
+    jsonBodyMaxBytes: parsePositiveInt(
+      env.SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES,
+      DEFAULT_SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES
     ),
     r2Prefix: sanitizeSnapshotPrefix(env.SESSION_SNAPSHOT_R2_PREFIX || DEFAULT_SESSION_SNAPSHOT_R2_PREFIX),
   };

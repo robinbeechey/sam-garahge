@@ -132,9 +132,11 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain("await this.markRuntimeSleeping('Container idle timeout expired; container is sleeping.')");
     expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)");
     expect(containerDo).toContain("status: 'sleeping'");
-    expect(containerDo).toContain('Container is asleep; wake/rehydrate is not implemented yet.');
-    expect(containerDo).toContain('Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01');
-    expect(containerDo).toContain("return new Response(SLEEPING_RESPONSE, { status: 503 })");
+    expect(containerDo).toContain("if (lifecycleStatus === 'sleeping')");
+    expect(containerDo).toContain('const wake = await this.wakeFromSnapshot()');
+    expect(containerDo).toContain('WAKE_DEGRADED_RESPONSE');
+    expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)");
+    expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus)");
     expect(chatResolver).toContain("inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])");
     expect(chatResolver).toContain("workspace.nodeStatus === 'sleeping'");
     expect(chatResolver).toContain('The workspace container is asleep.');

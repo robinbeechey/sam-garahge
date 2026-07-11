@@ -32,11 +32,10 @@ const DEGRADATIONS = new Set<SessionSnapshotDegradation>([
   'wip-only',
   'transcript-only',
 ]);
-const MAX_SNAPSHOT_JSON_BYTES = 256 * 1024;
 
 async function readJsonBody(c: SnapshotRouteContext) {
   const raw = await c.req.raw.text();
-  if (new TextEncoder().encode(raw).byteLength > MAX_SNAPSHOT_JSON_BYTES) {
+  if (new TextEncoder().encode(raw).byteLength > getSessionSnapshotConfig(c.env).jsonBodyMaxBytes) {
     throw errors.badRequest('Snapshot request body is too large');
   }
   try {
@@ -202,6 +201,7 @@ sessionSnapshotRoutes.get('/:id/session-snapshot/restore', async (c) => {
     degradation: snapshot.degradation,
     baseCommit: snapshot.baseCommit,
     manifest: snapshot.manifestJson ? JSON.parse(snapshot.manifestJson) : null,
+    config: getSessionSnapshotConfig(c.env),
     download: {
       home: snapshot.homeR2Key
         ? `/api/workspaces/${workspaceId}/session-snapshot/artifacts/home?chatSessionId=${encodeURIComponent(chatSessionId)}`

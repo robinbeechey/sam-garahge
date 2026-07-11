@@ -4,6 +4,7 @@ import type { Env } from '../../src/env';
 import {
   buildSessionSnapshotR2Key,
   DEFAULT_SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES,
+  DEFAULT_SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES,
   DEFAULT_SESSION_SNAPSHOT_R2_PREFIX,
   DEFAULT_SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES,
   DEFAULT_SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS,
@@ -24,6 +25,7 @@ describe('session snapshot config', () => {
       totalBudgetBytes: DEFAULT_SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES,
       entryThresholdBytes: DEFAULT_SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES,
       transferIdleTimeoutMs: DEFAULT_SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS,
+      jsonBodyMaxBytes: DEFAULT_SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES,
       r2Prefix: DEFAULT_SESSION_SNAPSHOT_R2_PREFIX,
     });
   });
@@ -34,6 +36,7 @@ describe('session snapshot config', () => {
       SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES: '1234',
       SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES: '567',
       SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS: '890',
+      SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES: '1024',
       SESSION_SNAPSHOT_R2_PREFIX: '/tenant snapshots/private/',
     }));
 
@@ -41,6 +44,7 @@ describe('session snapshot config', () => {
     expect(config.totalBudgetBytes).toBe(1234);
     expect(config.entryThresholdBytes).toBe(567);
     expect(config.transferIdleTimeoutMs).toBe(890);
+    expect(config.jsonBodyMaxBytes).toBe(1024);
     expect(config.r2Prefix).toBe('tenant-snapshots/private');
   });
 });

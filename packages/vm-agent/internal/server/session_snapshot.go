@@ -43,6 +43,9 @@ type snapshotRestoreResponse struct {
 	Degradation string                 `json:"degradation,omitempty"`
 	BaseCommit  string                 `json:"baseCommit,omitempty"`
 	Manifest    map[string]interface{} `json:"manifest,omitempty"`
+	Config      struct {
+		TransferIdleTimeoutMs int64 `json:"transferIdleTimeoutMs"`
+	} `json:"config"`
 	Download    struct {
 		Home     string `json:"home"`
 		WIP      string `json:"wip"`
@@ -260,7 +263,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "missing", restore.Reason, callbackToken)
 		return map[string]interface{}{"status": "transcript-replay", "reason": restore.Reason}, nil
 	}
-	idleTimeout := defaultSnapshotTransferIdleTimeout
+	idleTimeout := choosePositiveDurationMs(restore.Config.TransferIdleTimeoutMs, defaultSnapshotTransferIdleTimeout)
 	if restore.Download.Home != "" {
 		if err := s.downloadAndExtractTar(ctx, restore.Download.Home, callbackToken, idleTimeout); err != nil {
 			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
@@ -481,6 +484,10 @@ func createHomeTar(homeDirFn func() (string, error), entryThreshold, totalBudget
 			}
 			return nil
 		}
+		if !info.Mode().IsRegular() && !info.IsDir() {
+			skipped = append(skipped, snapshotSkippedEntry{Path: "~/" + rel, Reason: "unsupported home entry type"})
+			return nil
+		}
 		if !info.IsDir() && written+info.Size() > totalBudget {
 			skipped = append(skipped, snapshotSkippedEntry{Path: "~/" + rel, Reason: "snapshot budget exhausted", SizeBytes: info.Size()})
 			return nil
@@ -568,6 +575,7 @@ func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token 
 	if err != nil {
 		return err
 	}
+	home = filepath.Clean(home)
 	tr := tar.NewReader(newIdleReader(res.Body, idleTimeout))
 	for {
 		header, err := tr.Next()
@@ -577,8 +585,16 @@ func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token 
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(home, filepath.Clean(header.Name))
-		if !strings.HasPrefix(target, home) {
+		cleanName := filepath.Clean(header.Name)
+		if filepath.IsAbs(cleanName) || cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+			continue
+		}
+		target := filepath.Join(home, cleanName)
+		relTarget, relErr := filepath.Rel(home, target)
+		if relErr != nil || relTarget == ".." || strings.HasPrefix(relTarget, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 			continue
 		}
 		if header.FileInfo().IsDir() {

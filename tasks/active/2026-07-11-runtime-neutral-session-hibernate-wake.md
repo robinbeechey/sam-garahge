@@ -32,12 +32,34 @@ Hard constraints from Raphaël, 2026-07-11:
 - [x] Wire cf-container hibernate on control handback before sleep is allowed.
 - [x] Wire cf-container wake before proxying a sleeping container and before follow-up prompt dispatch; fall back visibly when no snapshot exists or restore fails.
 - [x] Update follow-up prompt handling so a fresh vm-agent can rebuild a `SessionHost` and attempt native harness resume from restored `$HOME`.
-- [ ] Add local tests: Worker service/unit tests, Miniflare/DO integration tests, VM-agent Go tests including `go test -race`, and a vertical-slice test covering Worker → DO → vm-agent → R2 state.
-- [ ] Run migration safety checks: `pnpm quality:migration-safety` and `pnpm quality:do-migration-safety`.
-- [ ] Run local quality gates: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and package-specific tests.
-- [ ] Run local specialist review skills and address findings.
+- [x] Add local tests: Worker service/unit tests, Miniflare/DO integration tests, VM-agent Go tests including `go test -race`, and a vertical-slice test covering Worker → DO → vm-agent → R2 state.
+- [x] Run migration safety checks: `pnpm quality:migration-safety` and `pnpm quality:do-migration-safety`.
+- [x] Run local quality gates: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and package-specific tests.
+- [x] Run local specialist review skills and address findings.
 - [ ] Open draft PR with `needs-human-review`, explicit no-merge/no-staging language, and local-only verification evidence.
 - [ ] Append idea `01KX4KSXEXQMP41KS34TW9EN01` with branch, draft PR, and deferred staging/merge status. Leave the idea open.
+
+## Verification Notes
+
+- `pnpm quality:migration-safety` passed.
+- `pnpm quality:do-migration-safety` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed with existing warnings and no errors.
+- `pnpm build` passed.
+- `pnpm test` passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/session-snapshots.test.ts tests/unit/routes/workspaces-session-snapshots.test.ts tests/unit/cf-container-runtime-contract.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `go test ./internal/server` passed in `packages/vm-agent`.
+- `go test -race ./...` passed in `packages/vm-agent`.
+- `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/session-snapshot-wiring.test.ts` was attempted locally, but the Cloudflare `workerd` binary (`@cloudflare/workerd-linux-64@1.20260329.1`) segfaulted during startup before the test body ran. Staging verification remains intentionally deferred by instruction.
+
+## Local Specialist Review Notes
+
+- `$cloudflare-specialist`: additive D1 migration and R2-backed snapshot metadata are in place; app enforces snapshot expiry and avoids cron sweeping. R2 lifecycle policy provisioning remains an operational follow-up before merge.
+- `$go-specialist`: vm-agent hibernate/restore uses local git bundles, no remote push, progress/idle transfer watchdogs, tar extraction hardening, and `go test -race ./...` passed.
+- `$security-auditor`: callback auth is workspace scoped, R2 keys are server derived, fresh secret/env/file injection reruns after restore, and snapshot errors avoid logging secret material.
+- `$constitution-validator` and `$env-validator`: snapshot TTL, budgets, thresholds, watchdogs, JSON body limit, and R2 prefix are env-configurable with `DEFAULT_*` constants.
+- `$test-engineer`: unit, route, worker wiring, and Go edge tests cover deterministic keys, auth scoping, oversized entries, git operation degradation, and tar traversal rejection.
 
 ## Acceptance Criteria
 
