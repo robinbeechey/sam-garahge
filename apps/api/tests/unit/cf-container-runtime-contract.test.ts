@@ -145,6 +145,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
     expect(containerDo).toContain('nodeCallbackToken: string');
     expect(containerDo).toContain('CALLBACK_TOKEN: secrets.nodeCallbackToken');
+    expect(containerDo).toContain("DEFAULT_DEVCONTAINER_CONFIG_PATH: '/var/lib/vm-agent/default-devcontainer.json'");
     expect(containerDo).toContain("status === 'stopped' ? 'stopped' : 'error'");
     expect(containerDo).not.toContain("Container idle timeout expired; start a new instant session.");
     expect(containerDo).not.toContain("await this.markRuntimeEnded('expired'");
