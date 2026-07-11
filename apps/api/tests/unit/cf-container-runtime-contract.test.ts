@@ -158,6 +158,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
+    expect(dockerfile).toContain('@devcontainers/cli');
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
     expect(bootstrap).toContain('agent_bin_dir="/var/lib/vm-agent/bin"');
