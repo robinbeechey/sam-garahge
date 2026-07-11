@@ -97,15 +97,24 @@ func (r *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Request) {
+type sessionSnapshotHandlerInput struct {
+	workspaceID   string
+	sessionID     string
+	chatSessionID string
+	runtimeName   string
+	runtime       *WorkspaceRuntime
+	callbackToken string
+}
+
+func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request) (*sessionSnapshotHandlerInput, bool) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
 	if workspaceID == "" || sessionID == "" {
 		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
-		return
+		return nil, false
 	}
 	if !s.requireNodeManagementAuth(w, r, workspaceID) {
-		return
+		return nil, false
 	}
 	var body struct {
 		ChatSessionID string `json:"chatSessionId"`
@@ -113,24 +122,39 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+		return nil, false
 	}
 	body.ChatSessionID = strings.TrimSpace(body.ChatSessionID)
 	if body.ChatSessionID == "" {
 		writeError(w, http.StatusBadRequest, "chatSessionId is required")
-		return
+		return nil, false
 	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
-		return
+		return nil, false
 	}
 	callbackToken := s.callbackTokenForWorkspace(workspaceID)
 	if callbackToken == "" {
 		writeError(w, http.StatusConflict, "workspace callback token unavailable")
+		return nil, false
+	}
+	return &sessionSnapshotHandlerInput{
+		workspaceID:   workspaceID,
+		sessionID:     sessionID,
+		chatSessionID: body.ChatSessionID,
+		runtimeName:   body.Runtime,
+		runtime:       runtime,
+		callbackToken: callbackToken,
+	}, true
+}
+
+func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Request) {
+	input, ok := s.sessionSnapshotHandlerInput(w, r)
+	if !ok {
 		return
 	}
-	result, err := s.hibernateSessionSnapshot(r.Context(), runtime, sessionID, body.ChatSessionID, body.Runtime, callbackToken)
+	result, err := s.hibernateSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.runtimeName, input.callbackToken)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -139,41 +163,13 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.PathValue("workspaceId")
-	sessionID := r.PathValue("sessionId")
-	if workspaceID == "" || sessionID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
-		return
-	}
-	if !s.requireNodeManagementAuth(w, r, workspaceID) {
-		return
-	}
-	var body struct {
-		ChatSessionID string `json:"chatSessionId"`
-		Runtime       string `json:"runtime"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	body.ChatSessionID = strings.TrimSpace(body.ChatSessionID)
-	if body.ChatSessionID == "" {
-		writeError(w, http.StatusBadRequest, "chatSessionId is required")
-		return
-	}
-	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	input, ok := s.sessionSnapshotHandlerInput(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	callbackToken := s.callbackTokenForWorkspace(workspaceID)
-	if callbackToken == "" {
-		writeError(w, http.StatusConflict, "workspace callback token unavailable")
-		return
-	}
-	result, err := s.restoreSessionSnapshot(r.Context(), runtime, sessionID, body.ChatSessionID, callbackToken)
+	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.callbackToken)
 	if err != nil {
-		_ = s.reportSnapshotRestoreResult(context.Background(), workspaceID, body.ChatSessionID, "degraded", err.Error(), callbackToken)
+		_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", err.Error(), input.callbackToken)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "degraded", "message": err.Error()})
 		return
 	}
