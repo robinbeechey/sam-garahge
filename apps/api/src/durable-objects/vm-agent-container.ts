@@ -321,7 +321,7 @@ export class VmAgentContainer extends Container<Env> {
       return { ok: false, message: 'Workspace session metadata is unavailable.' };
     }
     const agentSession = await db
-      .select({ id: schema.agentSessions.id })
+      .select({ id: schema.agentSessions.id, agentType: schema.agentSessions.agentType })
       .from(schema.agentSessions)
       .where(eq(schema.agentSessions.workspaceId, config.workspaceId))
       .orderBy(desc(schema.agentSessions.updatedAt))
@@ -355,6 +355,7 @@ export class VmAgentContainer extends Container<Env> {
         body: JSON.stringify({
           chatSessionId: workspace.chatSessionId,
           runtime: 'cf-container',
+          agentType: agentSession.agentType,
         }),
       }),
       config.vmAgentPort

@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/acp"
 )
 
 const (
@@ -104,6 +106,7 @@ type sessionSnapshotHandlerInput struct {
 	runtimeName   string
 	runtime       *WorkspaceRuntime
 	callbackToken string
+	agentType     string
 }
 
 func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request) (*sessionSnapshotHandlerInput, bool) {
@@ -119,6 +122,7 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 	var body struct {
 		ChatSessionID string `json:"chatSessionId"`
 		Runtime       string `json:"runtime"`
+		AgentType     string `json:"agentType"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -146,6 +150,7 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		runtimeName:   body.Runtime,
 		runtime:       runtime,
 		callbackToken: callbackToken,
+		agentType:     strings.TrimSpace(body.AgentType),
 	}, true
 }
 
@@ -167,7 +172,7 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.callbackToken)
+	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
 	if err != nil {
 		_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", err.Error(), input.callbackToken)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "degraded", "message": err.Error()})
@@ -250,7 +255,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 	return map[string]interface{}{"status": manifest.Status, "degradation": manifest.Degradation, "skipped": manifest.Skipped}, nil
 }
 
-func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, callbackToken string) (map[string]interface{}, error) {
+func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, agentType, callbackToken string) (map[string]interface{}, error) {
 	restore, err := s.fetchSnapshotRestore(ctx, runtime.ID, chatSessionID, callbackToken)
 	if err != nil {
 		return nil, err
@@ -270,9 +275,15 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	// extraction so current runtime assets and credentials overwrite stale
 	// snapshot copies, but before applying the Git WIP bundle, which requires a
 	// materialized repository.
-	if _, err := s.provisionWorkspaceRuntime(ctx, runtime); err != nil {
-		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", err.Error(), callbackToken)
-		return nil, err
+	var provisionErr error
+	if s.config.IsStandaloneMode() {
+		provisionErr = s.prepareStandaloneWorkspaceRuntime(ctx, runtime)
+	} else {
+		_, provisionErr = s.provisionWorkspaceRuntime(ctx, runtime)
+	}
+	if provisionErr != nil {
+		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", provisionErr.Error(), callbackToken)
+		return nil, provisionErr
 	}
 	if restore.Download.WIP != "" {
 		workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
@@ -281,7 +292,21 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 			return nil, err
 		}
 	}
-	if session, exists := s.agentSessions.Get(runtime.ID, sessionID); exists {
+	if s.config.IsStandaloneMode() {
+		if strings.TrimSpace(agentType) == "" {
+			return nil, fmt.Errorf("agent type is required to restore a standalone session")
+		}
+		session, _, createErr := s.agentSessions.Create(runtime.ID, sessionID, "Restored session", "restore:"+sessionID)
+		if createErr != nil {
+			return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
+		}
+		hostKey := runtime.ID + ":" + sessionID
+		host := s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
+		host.SelectAgent(ctx, agentType)
+		if host.Status() != acp.HostReady {
+			return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
+		}
+	} else if session, exists := s.agentSessions.Get(runtime.ID, sessionID); exists {
 		hostKey := runtime.ID + ":" + sessionID
 		_ = s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
 	}
