@@ -945,6 +945,8 @@ export const nodes = sqliteTable(
     nodeRole: text('node_role').notNull().default('workspace'),
     /** 'shared' = eligible for multi-tenant placement; 'exclusive' = one deployment environment only. */
     nodeMode: text('node_mode').notNull().default('shared'),
+    /** Runtime substrate: 'vm' (default) or 'cf-container' for the Sandbox spike. */
+    runtime: text('runtime').notNull().default('vm'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()
@@ -955,6 +957,7 @@ export const nodes = sqliteTable(
   },
   (table) => ({
     userIdIdx: index('idx_nodes_user_id').on(table.userId),
+    runtimeIdx: index('idx_nodes_runtime').on(table.runtime),
   })
 );
 
@@ -1048,6 +1051,10 @@ export const agentSessions = sqliteTable(
     status: text('status').notNull().default('running'),
     label: text('label'),
     agentType: text('agent_type'),
+    agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
+      onDelete: 'set null',
+    }),
+    skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
     suspendedAt: text('suspended_at'),
@@ -1063,6 +1070,8 @@ export const agentSessions = sqliteTable(
   (table) => ({
     workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
     userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
+    agentProfileIdIdx: index('idx_agent_sessions_agent_profile_id').on(table.agentProfileId),
+    skillIdIdx: index('idx_agent_sessions_skill_id').on(table.skillId),
     // Compound index for filtered session queries (P2 fix).
     workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status').on(
       table.workspaceId,
@@ -1142,6 +1151,8 @@ export const agentProfiles = sqliteTable(
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
+    /** Runtime preference: null = automatic, 'vm' = cloud VM, 'cf-container' = Cloudflare Container. */
+    runtime: text('runtime'),
     /** Devcontainer config name override. null = inherit from project/platform defaults. */
     devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode'),
@@ -1198,6 +1209,7 @@ export const skills = sqliteTable(
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
+    runtime: text('runtime'),
     devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode').default('task'),
     resourceRequirementsJson: text('resource_requirements_json'),

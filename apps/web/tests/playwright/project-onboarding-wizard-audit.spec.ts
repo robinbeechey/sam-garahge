@@ -224,6 +224,11 @@ test.describe('Project onboarding wizard', () => {
     await expect(nav.getByRole('button', { name: /Create trigger/ })).toBeVisible();
     await screenshot(page, 'onboarding-06-automation');
     await assertNoOverflow(page);
+    await page.locator('.sam-main-content').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await screenshot(page, 'onboarding-06-automation-lower');
+    await assertNoOverflow(page);
   });
 
   test('hides the SAM option when Artifacts is disabled', async ({ page }) => {

@@ -310,6 +310,7 @@ export type {
   AgentEffort,
   AgentPermissionMode,
   AgentProfile,
+  AgentProfileRuntime,
   AgentProviderMode,
   AgentSettings,
   AgentSettingsResponse,
@@ -331,6 +332,7 @@ export type {
 } from './agent-settings';
 export {
   AGENT_EFFORT_LEVELS,
+  AGENT_PROFILE_RUNTIMES,
   DEFAULT_AGENT_EFFORT,
   DEFAULT_GITHUB_CLI_POLICY,
   DEFAULT_OPENCODE_GO_MODEL,
@@ -340,6 +342,7 @@ export {
   GITHUB_CLI_POLICY_PERMISSION_KEYS,
   isAgentEffort,
   isAgentEffortSupported,
+  isAgentProfileRuntime,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
   resolveOpenCodeProvider,
