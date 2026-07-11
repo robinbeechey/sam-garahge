@@ -109,13 +109,18 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   async proxyHttp(request: Request, port?: number): Promise<Response> {
-    const state = await this.getState();
+    let state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (lifecycleStatus === 'sleeping') {
       const wake = await this.wakeFromSnapshot();
       if (!wake.ok) {
         return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
       }
+      // wakeFromSnapshot launched a fresh container and restored the session.
+      // Re-read the container state so the stopped-check below reflects the
+      // now-running container instead of the pre-wake stopped snapshot,
+      // otherwise a successfully-woken session is wrongly rejected with 410.
+      state = await this.getState();
     }
     if (state.status === 'stopped' || state.status === 'stopped_with_code') {
       return new Response('Container is stopped; create a new instant session.', { status: 410 });
@@ -234,13 +239,16 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   override async fetch(request: Request): Promise<Response> {
-    const state = await this.getState();
+    let state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (lifecycleStatus === 'sleeping') {
       const wake = await this.wakeFromSnapshot();
       if (!wake.ok) {
         return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
       }
+      // Re-read the container state after wake so the stopped-check reflects
+      // the freshly-launched container, not the pre-wake stopped snapshot.
+      state = await this.getState();
     }
     if (state.status === 'stopped' || state.status === 'stopped_with_code') {
       return new Response('Container is stopped; create a new instant session.', { status: 410 });
