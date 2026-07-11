@@ -266,16 +266,20 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 			return nil, err
 		}
 	}
+	// A freshly launched runtime has no repository yet. Provision it after HOME
+	// extraction so current runtime assets and credentials overwrite stale
+	// snapshot copies, but before applying the Git WIP bundle, which requires a
+	// materialized repository.
+	if _, err := s.provisionWorkspaceRuntime(ctx, runtime); err != nil {
+		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", err.Error(), callbackToken)
+		return nil, err
+	}
 	if restore.Download.WIP != "" {
 		workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
 		if err := s.downloadAndRestoreWIP(ctx, restore.Download.WIP, callbackToken, idleTimeout, workDir, restore.BaseCommit); err != nil {
 			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "wip_failed", err.Error(), callbackToken)
 			return nil, err
 		}
-	}
-	if _, err := s.provisionWorkspaceRuntime(ctx, runtime); err != nil {
-		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", err.Error(), callbackToken)
-		return nil, err
 	}
 	if session, exists := s.agentSessions.Get(runtime.ID, sessionID); exists {
 		hostKey := runtime.ID + ":" + sessionID
