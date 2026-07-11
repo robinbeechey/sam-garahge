@@ -15,6 +15,7 @@ import {
 } from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
 
 const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
@@ -64,6 +65,10 @@ export function getNodeAgentReadyPollIntervalMs(env: {
 
 export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_MS?: string }): number {
   return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
+}
+
+export function getCfContainerWakeTimeoutMs(env: { CF_CONTAINER_WAKE_TIMEOUT_MS?: string }): number {
+  return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
 }
 
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {

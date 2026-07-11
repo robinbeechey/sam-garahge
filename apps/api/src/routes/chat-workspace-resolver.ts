@@ -91,7 +91,7 @@ export async function resolveLiveWorkspaceForSession(
 export async function resolveLiveAgentSessionForChat(
   db: ChatDb,
   { projectId, sessionId, userId }: { projectId: string; sessionId: string; userId: string }
-): Promise<{ workspace: { id: string; nodeId: string }; agentSession: { id: string } }> {
+): Promise<{ workspace: { id: string; nodeId: string; nodeStatus: string }; agentSession: { id: string } }> {
   // Find the workspace linked to this chat session, scoped to the owning
   // project + user (see resolveLiveWorkspaceForSession). The node join also
   // verifies the node is still active: when a node is destroyed (e.g., after
@@ -135,5 +135,5 @@ export async function resolveLiveAgentSessionForChat(
     throw errors.notFound('No running agent session found');
   }
 
-  return { workspace: { id: workspace.id, nodeId: workspace.nodeId }, agentSession };
+  return { workspace: { id: workspace.id, nodeId: workspace.nodeId, nodeStatus: workspace.nodeStatus }, agentSession };
 }
