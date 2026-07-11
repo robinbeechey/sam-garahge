@@ -80,3 +80,5 @@ Updated authorization from Raphaël, 2026-07-11:
 - Restore checked out a temporary branch and attempted to delete it while current; remediation now imports the advertised bundle ref, materializes its tree, and leaves WIP uncommitted on the original branch.
 - R2 cleanup was not provisioned. Pulumi now owns a prefix-scoped lifecycle rule, and its positive TTL configuration is injected into the Worker so application expiry and object deletion stay aligned.
 - The initial PR exceeded the API file-size gate and omitted preflight/specialist evidence markers; the node snapshot wrappers are extracted and durable PR evidence must be added after final reviewers complete.
+- Final security pass requires upload `Content-Length`, derives artifact sizes from R2, enforces the aggregate budget, validates manifest workspace/chat identity, and rejects restore paths that traverse pre-existing home symlinks.
+- PR evidence now includes the required Agent Preflight and eight-reviewer table; staging remains the only intentionally pending merge gate.
