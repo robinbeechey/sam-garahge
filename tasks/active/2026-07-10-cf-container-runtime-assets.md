@@ -27,20 +27,20 @@ This must be fixed without putting user runtime assets or secrets into Cloudflar
 
 ## Implementation Checklist
 
-- [ ] Add `agent_profile_id` and `skill_id` nullable columns to `agent_sessions` with schema/migration updates.
-- [ ] Extend `startSamAwareAgentSession()` input/insert/update paths to persist optional taskless runtime context, and wire `launchInstantSession()` to pass resolved `agentProfileId` and `skillId`.
-- [ ] Extract workspace runtime asset resolution into an API service that accepts `{ workspaceId, agentSessionId? }`, preserves project < profile < skill precedence, validates project/user ownership, falls back to task and workspace context, and fails closed on invalid session context.
-- [ ] Update `GET /api/workspaces/:id/runtime-assets` to use the service and optional `agentSessionId` query while preserving workspace-scoped callback auth and node-token rejection.
-- [ ] Add/adjust API tests for project-only assets, task profile/skill fallback, taskless agent-session context, invalid session context, secret metadata, node-token rejection, and instant launch not embedding asset values in container config.
-- [ ] Preserve `IsSecret` through Go runtime asset structs and bootstrap structs.
-- [ ] Add runtime-neutral or shared Go helpers for env key validation and standalone runtime file path normalization/application, including `~/...` behavior, traversal rejection, atomic writes where practical, `0600` for secret files, and safe errors/logs.
-- [ ] Add a per-session vm-agent runtime asset provider/fetcher that calls `/runtime-assets?agentSessionId=<sessionID>` with the workspace callback token outside `sessionHostMu`.
-- [ ] Apply standalone runtime files and inject runtime env vars into ACP `ProcessConfig` before the local ACP process starts; fail startup visibly on fetch/apply failure while allowing empty asset sets.
-- [ ] Update Docker exec env handling to honor explicit secret metadata in addition to existing name heuristics.
-- [ ] Preserve existing task-backed VM/devcontainer behavior and add targeted regression coverage.
-- [ ] Run focused API and Go tests, then the full required quality suite.
-- [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, go-specialist, security-auditor, constitution-validator, and test-engineer.
-- [ ] Coordinate staging deployment, deploy via `deploy-staging.yml`, verify migrations via CF API, create a staging profile/skill with env/file/secret assets, start a real Instant cf-container session, verify asset presence without echoing secret values, confirm no launch-env secret leakage, and clean up.
+- [x] Add `agent_profile_id` and `skill_id` nullable columns to `agent_sessions` with schema/migration updates.
+- [x] Extend `startSamAwareAgentSession()` input/insert/update paths to persist optional taskless runtime context, and wire `launchInstantSession()` to pass resolved `agentProfileId` and `skillId`.
+- [x] Extract workspace runtime asset resolution into an API service that accepts `{ workspaceId, agentSessionId? }`, preserves project < profile < skill precedence, validates project/user ownership, falls back to task and workspace context, and fails closed on invalid session context.
+- [x] Update `GET /api/workspaces/:id/runtime-assets` to use the service and optional `agentSessionId` query while preserving workspace-scoped callback auth and node-token rejection.
+- [x] Add/adjust API tests for project-only assets, task profile/skill fallback, taskless agent-session context, invalid session context, secret metadata, node-token rejection, and instant launch not embedding asset values in container config.
+- [x] Preserve `IsSecret` through Go runtime asset structs and bootstrap structs.
+- [x] Add runtime-neutral or shared Go helpers for env key validation and standalone runtime file path normalization/application, including `~/...` behavior, traversal rejection, atomic writes where practical, `0600` for secret files, and safe errors/logs.
+- [x] Add a per-session vm-agent runtime asset provider/fetcher that calls `/runtime-assets?agentSessionId=<sessionID>` with the workspace callback token outside `sessionHostMu`.
+- [x] Apply standalone runtime files and inject runtime env vars into ACP `ProcessConfig` before the local ACP process starts; fail startup visibly on fetch/apply failure while allowing empty asset sets.
+- [x] Update Docker exec env handling to honor explicit secret metadata in addition to existing name heuristics.
+- [x] Preserve existing task-backed VM/devcontainer behavior and add targeted regression coverage.
+- [x] Run focused API and Go tests, then the full required quality suite.
+- [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, go-specialist, security-auditor, constitution-validator, and test-engineer.
+- [x] Coordinate staging deployment, deploy via `deploy-staging.yml`, verify migrations via CF API, create a staging profile/skill with env/file/secret assets, start a real Instant cf-container session, verify asset presence without echoing secret values, confirm no launch-env secret leakage, and clean up.
 - [ ] Open PR, wait for CI, merge when green, monitor production deploy, and update idea `01KX4KRS8FNYYJQXWDS0QDM0EF` with PR/merge status.
 
 ## Acceptance Criteria
@@ -62,3 +62,22 @@ This must be fixed without putting user runtime assets or secrets into Cloudflar
 - Related merged PRs: #1557 and #1559
 - Key API files: `apps/api/src/routes/workspaces/runtime.ts`, `apps/api/src/routes/workspaces/_helpers.ts`, `apps/api/src/services/instant-session.ts`, `apps/api/src/services/agent-session-bootstrap.ts`, `apps/api/src/db/schema.ts`
 - Key vm-agent files: `packages/vm-agent/internal/server/project_runtime_assets.go`, `packages/vm-agent/internal/server/agent_ws.go`, `packages/vm-agent/internal/acp/session_host_startup.go`, `packages/vm-agent/internal/acp/process.go`, `packages/vm-agent/internal/bootstrap/bootstrap.go`
+
+## Verification Log
+
+- Local validation after the final route-level persistence fix:
+  - `pnpm lint` passed with existing warnings only.
+  - `pnpm typecheck` passed.
+  - `pnpm --filter @simple-agent-manager/api test` passed: 399 files, 5890 tests.
+  - `pnpm test` passed: 19 tasks successful.
+  - `pnpm build` passed: 9 tasks successful.
+  - `cd packages/vm-agent && go test ./...` passed.
+- Staging deploy coordination:
+  - Checked `deploy-staging.yml` active/queued runs before triggering: none.
+  - Deployed branch with GitHub Actions run `29133446080`; deploy and smoke-test jobs passed.
+- Staging runtime-asset probe:
+  - Temporary project `01KX7B3C7CYPWNE15CA9XZDT6X`, profile `01KX7B3HZ284ZKKS2TFY3A0B4A`, workspace `01KX7B41RNHKX4WQFEB9GRT49V`, agent session `01KX7B4BXP6KJZ2VYN9AMP7MYP`.
+  - Immediate D1 query confirmed `agent_sessions.agent_profile_id = 01KX7B3HZ284ZKKS2TFY3A0B4A` and `workspaces.agent_profile_hint = 01KX7B3HZ284ZKKS2TFY3A0B4A`.
+  - The cf-container `claude-code` agent ran the runtime asset check and returned assistant chunks `RUNTIME` + `_ASSETS_OK`, proving `SAM_RUNTIME_ASSET_TEST`, secret env presence, and `.sam-runtime-assets/staging-check.txt` were available.
+  - The secret value `staging-secret-do-not-print-01kx4krs8fny-claude` was not observed in session messages during polling.
+  - Temporary staging project/workspace cleanup confirmed: zero projects with name prefix `Runtime Assets Staging`.
