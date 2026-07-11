@@ -138,9 +138,9 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)");
     expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus)");
     expect(chatResolver).toContain("inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])");
-    expect(chatResolver).toContain("workspace.nodeStatus === 'sleeping'");
-    expect(chatResolver).toContain('The workspace container is asleep.');
-    expect(chatResolver).toContain('Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01');
+    expect(chatResolver).toContain("workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping'");
+    expect(chatResolver).toContain("inArray(schema.agentSessions.status, ['running', 'sleeping'])");
+    expect(chatResolver).not.toContain('The workspace container is asleep.');
     expect(containerDo).toContain("return new Response('Container is stopped; create a new instant session.', { status: 410 })");
     expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
     expect(containerDo).toContain('nodeCallbackToken: string');
