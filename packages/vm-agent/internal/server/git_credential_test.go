@@ -281,6 +281,140 @@ func TestIsAllowedCredentialPathForWorkspaceFallsBackToConfig(t *testing.T) {
 	}
 }
 
+// TestHandleGitCredentialGitLabFailClosedWithoutHostOrPath verifies the
+// request-side fail-closed gate: a gitlab-bound workspace must supply BOTH
+// host and path or the exchange returns 204 without ever contacting the
+// control plane. GitHub/Artifacts keep the empty-allow behavior (covered by
+// TestHandleGitCredentialSuccess).
+func TestHandleGitCredentialGitLabFailClosedWithoutHostOrPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "no host and no path", query: ""},
+		{name: "host without path", query: "&host=gitlab.com"},
+		{name: "path without host", query: "&path=group/project.git"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var controlPlaneCalls atomic.Int32
+			controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				controlPlaneCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null,"host":"gitlab.com","username":"oauth2","repositoryPath":"group/project"}`))
+			}))
+			defer controlPlane.Close()
+
+			s := &Server{
+				config: &config.Config{
+					ControlPlaneURL: controlPlane.URL,
+					WorkspaceID:     "ws-gitlab",
+					CallbackToken:   "gitlab-callback-token",
+				},
+				workspaces: map[string]*WorkspaceRuntime{
+					"ws-gitlab": {
+						ID:             "ws-gitlab",
+						CallbackToken:  "gitlab-callback-token",
+						RepoProvider:   "gitlab",
+						RepositoryHost: "gitlab.com",
+						RepositoryPath: "group/project",
+					},
+				},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-gitlab"+tc.query, nil)
+			req.Header.Set("Authorization", "Bearer gitlab-callback-token")
+
+			rec := httptest.NewRecorder()
+			s.handleGitCredential(rec, req)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if rec.Body.Len() != 0 {
+				t.Fatalf("expected empty body, got: %s", rec.Body.String())
+			}
+			if controlPlaneCalls.Load() != 0 {
+				t.Fatalf("gitlab-bound exchange without host+path must not fetch a token, got %d calls", controlPlaneCalls.Load())
+			}
+		})
+	}
+}
+
+// TestHandleGitCredentialGitLabResponseFailClosed verifies the response-side
+// gate: even when the local binding did NOT identify the workspace as gitlab
+// (e.g. unregistered runtime falling back to a github process config), a
+// control-plane response with provider=gitlab is only released when the caller
+// supplied a host and path and the resolved repositoryPath is verifiable.
+func TestHandleGitCredentialGitLabResponseFailClosed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		query     string
+		tokenBody string
+	}{
+		{
+			// Local binding says github (no prefetch gitlab gate), but the control
+			// plane resolves a gitlab credential — must not be released without
+			// host+path identification.
+			name:      "gitlab response without requested host and path",
+			query:     "",
+			tokenBody: `{"provider":"gitlab","token":"gl_token","expiresAt":null,"host":"gitlab.com","username":"oauth2","repositoryPath":"group/project"}`,
+		},
+		{
+			// Host+path supplied but the control plane response carries no
+			// repositoryPath — the binding cannot be verified, so refuse.
+			name:      "gitlab response without resolved repository path",
+			query:     "&host=gitlab.com&path=group/project.git",
+			tokenBody: `{"provider":"gitlab","token":"gl_token","expiresAt":null,"host":"gitlab.com","username":"oauth2"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.tokenBody))
+			}))
+			defer controlPlane.Close()
+
+			s := &Server{
+				config: &config.Config{
+					ControlPlaneURL: controlPlane.URL,
+					WorkspaceID:     "ws-mislabeled",
+					CallbackToken:   "callback-token",
+					RepoProvider:    "github",
+					RepositoryHost:  "gitlab.com",
+				},
+				workspaces: map[string]*WorkspaceRuntime{},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-mislabeled"+tc.query, nil)
+			req.Header.Set("Authorization", "Bearer callback-token")
+
+			rec := httptest.NewRecorder()
+			s.handleGitCredential(rec, req)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "gl_token") {
+				t.Fatal("gitlab token must not be released without verified host and path")
+			}
+		})
+	}
+}
+
 func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
 	t.Parallel()
 

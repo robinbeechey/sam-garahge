@@ -41,6 +41,20 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
 	requestedHost := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("host")))
 	requestedPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	// GitLab-bound workspaces vend a broad user OAuth token, so the exchange is
+	// fail-closed: the caller must identify both the host and the repository path
+	// it is requesting credentials for. GitHub/Artifacts keep the empty-allow
+	// behavior because the gh wrapper flow sends host=github.com with no path.
+	boundProvider, _ := s.credentialPathBinding(workspaceID)
+	if strings.EqualFold(boundProvider, "gitlab") && (requestedHost == "" || requestedPath == "") {
+		slog.Warn("Git credential request refused: gitlab-bound workspace requires host and path",
+			"workspaceID", workspaceID,
+			"hasHost", requestedHost != "",
+			"hasPath", requestedPath != "",
+		)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if requestedHost != "" && !s.isAllowedCredentialHostForWorkspace(workspaceID, requestedHost) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -80,6 +94,22 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		username = strings.TrimSpace(resp.Username)
 	}
 
+	// Response-side fail-closed gate for GitLab credentials: regardless of what
+	// the local binding said pre-fetch, a GitLab token is only released when the
+	// caller supplied a host and path AND both verifiably match the credential
+	// the control plane resolved. An empty resolved repositoryPath means we
+	// cannot verify the binding — refuse rather than vend a broad OAuth token.
+	gitlabResponse := strings.EqualFold(strings.TrimSpace(resp.Provider), "gitlab")
+	if gitlabResponse && (requestedHost == "" || requestedPath == "" || repositoryPath == "") {
+		slog.Warn("Git credential response withheld: gitlab credential requires verified host and path",
+			"workspaceID", workspaceID,
+			"hasRequestedHost", requestedHost != "",
+			"hasRequestedPath", requestedPath != "",
+			"hasResolvedPath", repositoryPath != "",
+		)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if requestedHost != "" && !credentialHostMatchesRequest(host, requestedHost) {
 		w.WriteHeader(http.StatusNoContent)
 		return

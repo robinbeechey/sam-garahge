@@ -130,4 +130,13 @@ Deferred to explicit later stack layers (documented, not blocking this draft):
 - Hardcoded GitLab OAuth scopes (constitution/security MED): kept at parity with the existing hardcoded GitHub scopes; scope narrowing can follow.
 - GitLabProjectSelector keyboard/ARIA combobox + no-results/provider-reset polish (ui H1/M2): later discovery/UX layer; matches existing BranchSelector/RepoSelector pattern.
 - Per-request config/D1 lookup de-duplication in the GitLab path (cloudflare MED): later optimization.
-- Fail-closed VM credential exchange when host/path are omitted on the request side; per-user OAuth refresh serialization; stale-host/account token lifecycle: later security layer.
+- Per-user OAuth refresh serialization; stale-host/account token lifecycle: later security layer.
+
+## 2026-07-12 Hardening Session (staging-readiness)
+
+- **CLOSED (was deferred above): fail-closed VM credential exchange for GitLab.** `handleGitCredential` now has two gates:
+  - Request-side: a workspace whose local binding (`credentialPathBinding`) is `gitlab` must supply BOTH non-empty `host` and `path` query params or the exchange returns 204 without contacting the control plane.
+  - Response-side: any control-plane response with `provider=gitlab` is withheld (204) unless the caller supplied host+path AND the resolved `repositoryPath` is non-empty, in addition to the existing exact host/path match checks. This also closes the "empty registered path passes" gap.
+  - GitHub/Artifacts keep the empty-allow behavior (the gh wrapper sends `host=github.com` with no path; GitHub tokens are repo-scoped installation tokens, unlike GitLab's broad user OAuth token).
+  - Tests: `TestHandleGitCredentialGitLabFailClosedWithoutHostOrPath`, `TestHandleGitCredentialGitLabResponseFailClosed`.
+- **Architecture note correction:** host/path from the credential helper are NOT forwarded to the control plane. The vm-agent sends an empty `{}` body with the callback token to `POST /api/workspaces/:id/git-token`; all host/path filtering is vm-agent-local against the workspace's registered binding and the control-plane-resolved `repositoryPath`.
