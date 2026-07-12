@@ -359,6 +359,53 @@ describe('workspace git-token GitHub scoping', () => {
     expect(mocks.getInstallationToken).not.toHaveBeenCalled();
   });
 
+  it('propagates GITLAB_REAUTH_REQUIRED as 401 when the owner token cannot be resolved', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.requireGitLabUserAccessTokenResultForOwner.mockRejectedValue(
+      Object.assign(
+        new Error('Your GitLab authorization has expired - please sign out and back in'),
+        { statusCode: 401, error: 'GITLAB_REAUTH_REQUIRED' }
+      )
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'GITLAB_REAUTH_REQUIRED' });
+    // No token exists, so upstream access must never be re-verified.
+    expect(mocks.verifyGitLabProjectAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects GitLab token exchange when repository metadata is missing', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.getProjectGitLabRepository.mockResolvedValue(null);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    // Fail closed BEFORE any token is minted.
+    expect(mocks.requireGitLabUserAccessTokenResultForOwner).not.toHaveBeenCalled();
+    expect(mocks.verifyGitLabProjectAccess).not.toHaveBeenCalled();
+  });
+
   it('returns Artifacts token expiry from camelCase binding shape', async () => {
     const createToken = vi.fn().mockResolvedValue({
       plaintext: 'artifacts-token?expires=ignored',
