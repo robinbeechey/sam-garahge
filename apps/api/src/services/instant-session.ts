@@ -8,6 +8,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { startSamAwareAgentSession } from './agent-session-bootstrap';
+import { getProjectGitLabRepository } from './gitlab';
 import { signCallbackToken, signNodeCallbackToken } from './jwt';
 import {
   type AgentSessionOverrides,
@@ -151,6 +152,39 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+async function resolveWorkspaceGitSource(
+  db: Db,
+  project: schema.Project
+): Promise<{
+  repoProvider: 'github' | 'artifacts' | 'gitlab';
+  cloneUrl: string | null;
+  repositoryHost: string | null;
+  repositoryPath: string | null;
+}> {
+  const repoProvider =
+    project.repoProvider === 'gitlab'
+      ? 'gitlab'
+      : project.repoProvider === 'artifacts'
+        ? 'artifacts'
+        : 'github';
+
+  if (repoProvider !== 'gitlab') {
+    return { repoProvider, cloneUrl: null, repositoryHost: null, repositoryPath: null };
+  }
+
+  const metadata = await getProjectGitLabRepository(db, project.id);
+  if (!metadata) {
+    throw new Error(`GitLab repository metadata is missing for project ${project.id}`);
+  }
+
+  return {
+    repoProvider,
+    cloneUrl: metadata.httpUrlToRepo,
+    repositoryHost: metadata.host,
+    repositoryPath: metadata.pathWithNamespace,
+  };
+}
+
 export async function launchInstantSession(
   db: Db,
   env: Env,
@@ -162,6 +196,7 @@ export async function launchInstantSession(
   const startedAt = Date.now();
   const branch = input.branch?.trim() || input.project.defaultBranch || 'main';
   const workspaceName = getWorkspaceName(input);
+  const gitSource = await resolveWorkspaceGitSource(db, input.project);
 
   const node = await createNodeRecord(env, {
     userId: input.userId,
@@ -264,6 +299,10 @@ export async function launchInstantSession(
         workspaceId,
         repository: input.project.repository,
         branch,
+        repoProvider: gitSource.repoProvider,
+        cloneUrl: gitSource.cloneUrl,
+        repositoryHost: gitSource.repositoryHost,
+        repositoryPath: gitSource.repositoryPath,
         callbackToken: workspaceCallbackToken,
         lightweight: true,
       })
