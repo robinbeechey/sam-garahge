@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // standaloneGitCredentialHelperPath is where the standalone git credential
@@ -24,7 +26,7 @@ const standaloneGitBinaryPath = "/usr/bin/git"
 // GitLab cannot use GH_TOKEN. It needs a fresh, path-bound token exchange through
 // the local vm-agent /git-credential endpoint. The endpoint performs the
 // workspace/provider/path authorization checks before returning credentials.
-const standaloneGitCredentialHelperScript = `#!/bin/sh
+const standaloneGitCredentialHelperScriptTemplate = `#!/bin/sh
 [ "${1:-get}" = "get" ] || exit 0
 host=""
 path=""
@@ -61,17 +63,29 @@ workspace_id=$(url_encode_query_value "$SAM_WORKSPACE_ID")
 encoded_host=$(url_encode_query_value "$host")
 encoded_path=$(url_encode_query_value "$path")
 
-curl -fsS --max-time 5 \
+curl -fsS --max-time {{ credential_timeout_seconds }} \
   "${endpoint}?workspaceId=${workspace_id}&host=${encoded_host}&path=${encoded_path}" 2>/dev/null || true
 `
+
+func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		return "", fmt.Errorf("invalid git credential timeout: %s", timeout)
+	}
+	timeoutSeconds := strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64)
+	return strings.ReplaceAll(
+		standaloneGitCredentialHelperScriptTemplate,
+		"{{ credential_timeout_seconds }}",
+		timeoutSeconds,
+	), nil
+}
 
 // ConfigureStandaloneGitCredentialHelper installs a git credential helper that
 // serves GitHub credentials from GH_TOKEN and delegates GitLab/non-GitHub
 // credentials to the local vm-agent exchange. This lets the agent's `git`
 // commands (clone, ls-remote, fetch, push) authenticate in standalone mode.
 // Failures are non-fatal — the agent can still run without git access.
-func ConfigureStandaloneGitCredentialHelper() {
-	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath); err != nil {
+func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
+	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath, timeout); err != nil {
 		slog.Warn("standalone git: failed to write credential helper; agent git auth unavailable", "error", err)
 		return
 	}
@@ -99,8 +113,12 @@ func ConfigureStandaloneGitCredentialHelper() {
 	slog.Info("standalone git: credential helper configured", "path", standaloneGitCredentialHelperPath)
 }
 
-func writeStandaloneGitCredentialHelper(path string) error {
-	if err := os.WriteFile(path, []byte(standaloneGitCredentialHelperScript), 0o700); err != nil {
+func writeStandaloneGitCredentialHelper(path string, timeout time.Duration) error {
+	script, err := renderStandaloneGitCredentialHelperScript(timeout)
+	if err != nil {
+		return fmt.Errorf("render helper: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		return fmt.Errorf("write helper: %w", err)
 	}
 	// os.WriteFile only applies the mode when creating the file. A restored

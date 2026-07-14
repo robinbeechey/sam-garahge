@@ -97,7 +97,9 @@ The linked SAM idea is `01KV7ZFD6HZS5N7J45VA798KN1`, "GitLab integration using p
 - Focused VM Go tests pass for bootstrap credential helper behavior, persistence, workspace metadata, git credential host/path checks, and GitLab MR creation.
 - Project onboarding Playwright audit passes on iPhone SE and desktop viewports.
 - Full `packages/vm-agent/internal/server` Go package test passes after installing Docker locally and running `dockerd` on `/tmp/sam-docker.sock`.
-- Staging validation is intentionally skipped by user instruction.
+- Historical note: staging validation was initially skipped under the earlier
+  draft-only constraint; that constraint was superseded on 2026-07-14 and a
+  current-commit staging pass is required before merge.
 - Refreshed onto foundation SHA `570f4a5090fe05e5b382b585cd2ea8be5ec0d2be` with merge commit `e06e820b2`.
 - Renumbered the GitLab sidecar migration from stale slot `0088` to additive slot `0091`.
 - Added route-level tests for GitLab workspace token exchange, exact identity drift rejection, and task/project access re-verification.
@@ -161,6 +163,13 @@ Deferred to explicit later stack layers (documented, not blocking this draft):
   The container image owns the helper as `node:node`, and both the vm-agent
   and agent process run as `node`, so broader execute permission is not
   required.
+- Made the credential-helper callback timeout configurable through
+  `GIT_CREDENTIAL_TIMEOUT` (default `5s`) for both VM/devcontainer and
+  standalone-container helpers. Focused config/render tests cover the default,
+  a fractional `1750ms` override, validation, and owner-only helper install;
+  the full touched Go package suites, race-enabled tests, and `go vet ./...`
+  pass (excluding only the pre-existing Docker-dependent server test in this
+  Docker-less runner).
 
 ### Post-Mortem: Omitted GitLab Metadata in Secondary Dispatch Paths
 

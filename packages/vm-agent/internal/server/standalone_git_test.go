@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // runStandaloneCredScript writes the helper script to a temp file and runs it
@@ -19,9 +20,13 @@ func runStandaloneCredScript(t *testing.T, arg, stdin, ghToken string) string {
 
 func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[string]string) string {
 	t.Helper()
+	script, err := renderStandaloneGitCredentialHelperScript(5 * time.Second)
+	if err != nil {
+		t.Fatalf("render script: %v", err)
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "git-credential-sam")
-	if err := os.WriteFile(path, []byte(standaloneGitCredentialHelperScript), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
 	cmd := exec.Command("/bin/sh", path, arg)
@@ -35,6 +40,18 @@ func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[str
 		t.Fatalf("run script: %v (out=%q)", err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestRenderStandaloneGitCredentialHelperScriptUsesConfiguredTimeout(t *testing.T) {
+	t.Parallel()
+
+	script, err := renderStandaloneGitCredentialHelperScript(1750 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("render script: %v", err)
+	}
+	if !strings.Contains(script, "--max-time 1.75") {
+		t.Fatalf("configured timeout missing from helper script: %q", script)
+	}
 }
 
 func TestStandaloneGitCredentialHelperServesTokenForGitHub(t *testing.T) {
@@ -53,7 +70,7 @@ func TestWriteStandaloneGitCredentialHelperRestoresOwnerOnlyExecutableMode(t *te
 		t.Fatalf("seed helper: %v", err)
 	}
 
-	if err := writeStandaloneGitCredentialHelper(path); err != nil {
+	if err := writeStandaloneGitCredentialHelper(path, 5*time.Second); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
 

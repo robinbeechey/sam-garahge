@@ -200,8 +200,9 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Port:          8080,
-		CallbackToken: "callback-token-123",
+		Port:                 8080,
+		CallbackToken:        "callback-token-123",
+		GitCredentialTimeout: 1750 * time.Millisecond,
 	}
 
 	script, err := renderGitCredentialHelperScript(cfg)
@@ -211,6 +212,7 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 
 	required := []string{
 		`http://${target}:8080/git-credential`,
+		`--max-time 1.75`,
 		"host.docker.internal",
 		"172.17.0.1",
 	}

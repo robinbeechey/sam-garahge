@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2228,6 +2229,14 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	if cfg.Port <= 0 {
 		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
 	}
+	credentialTimeout := cfg.GitCredentialTimeout
+	if credentialTimeout == 0 {
+		credentialTimeout = config.DefaultGitCredentialTimeout
+	}
+	if credentialTimeout < 0 {
+		return "", fmt.Errorf("invalid git credential timeout: %s", cfg.GitCredentialTimeout)
+	}
+	credentialTimeoutSeconds := strconv.FormatFloat(credentialTimeout.Seconds(), 'f', -1, 64)
 
 	query := ""
 	if workspaceID := strings.TrimSpace(cfg.WorkspaceID); workspaceID != "" {
@@ -2306,7 +2315,7 @@ resolve_gateway() {
 
 request_credentials() {
   target="$1"
-  curl -fsS --max-time 5%s \
+  curl -fsS --max-time %s%s \
     "%s://${target}:%d/git-credential${credential_query}"
 }
 
@@ -2319,7 +2328,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, shellSingleQuote(allowedGitLabHost), query, curlTLSFlag, scheme, cfg.Port), nil
+`, shellSingleQuote(allowedGitLabHost), query, credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
