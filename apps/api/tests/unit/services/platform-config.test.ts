@@ -199,6 +199,29 @@ describe('platform config resolver', () => {
     });
   });
 
+  it('returns null GitLab OAuth config when the host is missing', async () => {
+    const env = createEnv({ GITLAB_HOST: undefined });
+    await expect(getGitLabOAuthConfig(env)).resolves.toBeNull();
+  });
+
+  it('returns null GitLab OAuth config when the client id is missing', async () => {
+    const env = createEnv({ GITLAB_CLIENT_ID: undefined });
+    await expect(getGitLabOAuthConfig(env)).resolves.toBeNull();
+  });
+
+  it('returns null GitLab OAuth config when the client secret is missing', async () => {
+    const env = createEnv({ GITLAB_CLIENT_SECRET: undefined });
+    await expect(getGitLabOAuthConfig(env)).resolves.toBeNull();
+  });
+
+  it('normalizes a GitLab host with a path down to its origin', async () => {
+    const env = createEnv({ GITLAB_HOST: 'https://gitlab.example.com/some/path?x=1' });
+    await expect(getGitLabOAuthConfig(env)).resolves.toMatchObject({
+      host: 'https://gitlab.example.com',
+      apiBaseUrl: 'https://gitlab.example.com/api/v4',
+    });
+  });
+
   it('skips an undecryptable runtime secret and falls back to env instead of throwing', async () => {
     const env = createEnv();
     await env.DATABASE.prepare(
