@@ -147,6 +147,6 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
 
     const res = await requestBootstrapToken('no-callback-token');
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });
