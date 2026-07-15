@@ -36,11 +36,11 @@ This task creates a tightly scoped frontend PR to ensure prototype/test/demo sur
 
 ## Checklist
 
-- [ ] Add an explicit non-production route gate for dev/prototype/test-only routes.
-- [ ] Keep intended local/development access for prototype/test harness routes.
-- [ ] Ensure production users navigating directly to prototype/test/dev-only routes are redirected to the normal fallback.
-- [ ] Ensure production navigation does not expose prototype/test/dev-only surfaces.
-- [ ] Add unit coverage proving route registration behavior in production and development.
+- [x] Add an explicit non-production route gate for dev/prototype/test-only routes.
+- [x] Keep intended local/development access for prototype/test harness routes.
+- [x] Ensure production users navigating directly to prototype/test/dev-only routes are redirected to the normal fallback.
+- [x] Ensure production navigation does not expose prototype/test/dev-only surfaces.
+- [x] Add unit coverage proving route registration behavior in production and development.
 - [ ] Run relevant frontend tests and quality checks.
 - [ ] Use UI and test review skills before finalizing.
 - [ ] Open a PR on `sam/execute-task-using-skill-w566x5` and do not merge.
