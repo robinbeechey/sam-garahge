@@ -24,7 +24,7 @@ The prior "Deep CTO codebase review orchestration" session dispatched remediatio
 - [x] Merge the six PR branches into the joint branch, resolving conflicts deliberately.
 - [x] Run local validation appropriate to affected files.
 - [x] Open a temporary joint PR with source PR references and validation plan.
-- [ ] Wait for CI and fix any failures.
+- [x] Wait for CI and fix any failures.
 - [x] Deploy the joint PR branch to staging.
 - [x] Validate all affected surfaces from the six PRs.
 - [x] Validate core message submission flows for claude, codex, and opencode agents.
@@ -45,7 +45,7 @@ The prior "Deep CTO codebase review orchestration" session dispatched remediatio
 
 ## Validation evidence
 
-- Joint PR: #1601. Latest fully green pre-staging CI head before the final staging-spec correction: `6c070470f3884856a9a5dc9470792de6c29a6aff` (main CI, CodSpeed, and E2E Smoke all passed). Final CI after this task/evidence commit remains required before merge.
+- Joint PR: #1601. Runtime-validation CI head `ea6c16bdfbcad49eb172f3abb8f71a383568b967` completed successfully in run `29400358432`, including Playwright Visual Tests, VM Agent checks, CodSpeed, SonarCloud, and VM Agent Smoke run `29400358406`. The later task-file-only bookkeeping commit changes no runtime code and must have required checks green before merge.
 - Staging deployment: `Deploy Staging` run `29398161022` completed successfully, including `deploy / Deploy to Cloudflare` and `smoke-tests`.
 - Cloudflare/staging health checks: `https://api.sammy.party/health` returned healthy; read-only D1 checks succeeded (`users=4`, `projects=33`, `tasks=247`, `nodes=108`, `workspaces=134`, `rows_written=0`); latest migration query showed `0093_webhook_triggers.sql` applied.
 - Live file-preview validation: `PLAYWRIGHT_BASE_URL=https://app.sammy.party pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/staging-file-preview-v2.spec.ts --project='Desktop (1280x800)'` passed after updating the stale staging spec to assert the hardened inert HTML sandbox (`sandbox=""`, no `<script>`, script result remains `not run`).
