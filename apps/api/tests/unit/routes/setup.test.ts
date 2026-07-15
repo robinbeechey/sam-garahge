@@ -29,6 +29,20 @@ function createD1(sqlite: Database.Database): D1Database {
         },
       };
     },
+    async batch(statements: D1PreparedStatement[]) {
+      sqlite.exec('BEGIN');
+      const results: D1Result[] = [];
+      try {
+        for (const statement of statements) {
+          results.push(await statement.run());
+        }
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (err) {
+        sqlite.exec('ROLLBACK');
+        throw err;
+      }
+    },
   } as unknown as D1Database;
 }
 
@@ -265,4 +279,115 @@ describe('setup routes', () => {
       },
     });
   });
+
+  it('rejects invalid setup token without writing config', async () => {
+    const env = createEnv();
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.14' },
+        body: JSON.stringify({
+          token: 'wrong-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+        }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'UNAUTHORIZED' });
+    const written = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'integration.google.clientId'"
+    ).first<{ value: string }>();
+    expect(written).toBeUndefined();
+  });
+
+  it('does not persist partial config when setup completion validation fails', async () => {
+    const env = createEnv({ GITHUB_CLIENT_ID: undefined, GITHUB_CLIENT_SECRET: undefined });
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.15' },
+        body: JSON.stringify({ token: 'setup-token', config: { github: { appId: '12345' } } }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    const appId = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'integration.github.appId'"
+    ).first<{ value: string }>();
+    const completed = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'setup.completed'"
+    ).first<{ value: string }>();
+    expect(appId).toBeUndefined();
+    expect(completed).toBeUndefined();
+  });
+
+
+  it('rolls back setup config when the transactional completion write fails', async () => {
+    const env = createEnv();
+    const originalPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+    env.DATABASE.prepare = ((sql: string) => {
+      const statement = originalPrepare(sql);
+      const originalBind = statement.bind.bind(statement);
+      statement.bind = ((...values: unknown[]) => {
+        const bound = originalBind(...values);
+        if (values[0] === 'setup.completed') {
+          const originalRun = bound.run.bind(bound);
+          bound.run = async () => {
+            await originalRun();
+            throw new Error('forced completion write failure');
+          };
+        }
+        return bound;
+      }) as D1PreparedStatement['bind'];
+      return statement;
+    }) as D1Database['prepare'];
+
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.17' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+        }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    const clientId = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'integration.google.clientId'"
+    ).first<{ value: string }>();
+    const completed = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'setup.completed'"
+    ).first<{ value: string }>();
+    expect(clientId).toBeUndefined();
+    expect(completed).toBeUndefined();
+  });
+
+  it('treats replayed setup completion as closed without changing public response shape', async () => {
+    const env = createEnv();
+    const request = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.16' },
+      body: JSON.stringify({
+        token: 'setup-token',
+        config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+      }),
+    };
+
+    const first = await createApp().request('/api/setup/complete', request, env);
+    expect(first.status).toBe(200);
+
+    const second = await createApp().request('/api/setup/complete', request, env);
+    expect(second.status).toBe(410);
+    await expect(second.json()).resolves.toMatchObject({ error: 'SETUP_CLOSED' });
+  });
+
 });
