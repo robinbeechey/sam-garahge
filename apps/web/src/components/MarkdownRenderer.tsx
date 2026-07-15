@@ -14,7 +14,23 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import { sanitizeUrl } from '../lib/url-utils';
+
+const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
+
+function sanitizeMarkdownHref(href: string | undefined): string {
+  if (!href) return '#';
+  const trimmed = href.trim();
+  if (!trimmed) return '#';
+  if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+    return trimmed;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return SAFE_MARKDOWN_URL_PROTOCOLS.has(parsed.protocol) ? trimmed : '#';
+  } catch {
+    return '#';
+  }
+}
 
 export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
 
@@ -191,7 +207,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={sanitizeUrl(href ?? '')} target="_blank" rel="noreferrer" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
+            <a href={sanitizeMarkdownHref(href)} target="_blank" rel="noreferrer noopener" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
               {children}
             </a>
           ),

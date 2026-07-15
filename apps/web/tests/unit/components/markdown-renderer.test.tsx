@@ -65,7 +65,17 @@ describe('RenderedMarkdown', () => {
     const link = screen.getByRole('link', { name: 'SAM' });
     expect(link).toHaveAttribute('href', 'https://example.com/docs');
     expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', 'noreferrer');
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener');
+  });
+
+
+
+  it('preserves relative markdown links for local preview navigation', () => {
+    render(<RenderedMarkdown content={'[Section](#section) [Guide](/docs/guide) [Relative](../README.md)'} />);
+
+    expect(screen.getByRole('link', { name: 'Section' })).toHaveAttribute('href', '#section');
+    expect(screen.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/docs/guide');
+    expect(screen.getByRole('link', { name: 'Relative' })).toHaveAttribute('href', '../README.md');
   });
 
   it('fails closed for unsafe markdown link protocols', () => {
