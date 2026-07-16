@@ -378,12 +378,13 @@ export function useProjectChatState() {
     void loadSessions().finally(() => setLoading(false));
   }, [loadSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Periodic background sync — self-heals if a WebSocket delta was silently dropped
+  // Periodic background sync — self-heals if a WebSocket delta was silently dropped.
+  // Depends on `loading` to defer until the first load completes.
   useEffect(() => {
-    if (!hasLoadedRef.current) return;
+    if (loading) return;
     const interval = setInterval(() => void loadSessions(), SESSION_SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [loadSessions]);
+  }, [loading, loadSessions]);
 
   // Poll task status during provisioning
   useEffect(() => {
