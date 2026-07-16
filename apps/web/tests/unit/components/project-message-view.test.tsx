@@ -246,9 +246,12 @@ describe('ProjectMessageView — session isolation', () => {
     // Initial load requests the full-conversation ceiling.
     await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(1));
     expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
-
     // The fallback poll must request only the small recent window — never the ceiling.
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_500); });
+    // Under full coverage load, React may commit the polling effect after the
+    // first timer advance, so advance multiple intervals until it fires.
+    for (let attempts = 0; attempts < 3 && limits.length < 2; attempts += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_500); });
+    }
     await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(2));
     expect(limits.slice(1)).toContain(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
     expect(limits.slice(1)).not.toContain(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
