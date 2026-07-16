@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
-import { useProjectWebSocket } from '../../hooks/useProjectWebSocket';
+import { useProjectWebSocket, type RawSessionEvent } from '../../hooks/useProjectWebSocket';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
@@ -46,7 +46,9 @@ import {
 } from './types';
 import { useAttachments } from './useAttachments';
 import { useProjectSkills } from './useProjectSkills';
-import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
+import { useSessionReducer } from './useSessionReducer';
+import { rawToSessionEvent } from './useSessionReducer';
+import { useStableTaskInfoMap } from './useStableTaskInfoMap';
 
 /** Pre-filled fork/retry context shown on the new chat screen. */
 export interface PendingDerived {
@@ -115,7 +117,7 @@ export function useProjectChatState() {
   const executeIdeaId = searchParams.get('executeIdea');
   const executeIdeaIdRef = useRef<string | null>(null);
 
-  const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
+  const { sessions, dispatchEvent, resetSessions } = useSessionReducer();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
@@ -208,7 +210,7 @@ export function useProjectChatState() {
 
   // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
-  const [taskInfoMap, setTaskInfoMap] = useState<Map<string, TaskInfo>>(new Map());
+  const { taskInfoMap, replaceAll: replaceTaskInfoMap } = useStableTaskInfoMap();
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
@@ -350,7 +352,7 @@ export function useProjectChatState() {
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
       const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope });
-      setSessions(sessionResult.sessions);
+      resetSessions(sessionResult.sessions);
       hasLoadedRef.current = true;
 
       listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
@@ -358,7 +360,7 @@ export function useProjectChatState() {
           const titleMap = new Map<string, string>();
           for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
           setTaskTitleMap(titleMap);
-          setTaskInfoMap(buildTaskInfoMap(tasksResult.tasks as Task[]));
+          replaceTaskInfoMap(tasksResult.tasks as Task[]);
         })
         .catch(() => { /* task titles are cosmetic */ });
 
@@ -368,11 +370,17 @@ export function useProjectChatState() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId, sessionScope, multiplayerActive]);
+  }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
+
+  const handleSessionEvent = useCallback((raw: RawSessionEvent) => {
+    const event = rawToSessionEvent(raw);
+    if (event) dispatchEvent(event);
+  }, [dispatchEvent]);
 
   const { connectionState } = useProjectWebSocket({
     projectId,
-    onSessionChange: loadSessions,
+    onSessionEvent: handleSessionEvent,
+    onReconnected: loadSessions,
   });
 
   const realtimeDegraded = connectionState === 'disconnected';
