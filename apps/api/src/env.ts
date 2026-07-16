@@ -1,10 +1,11 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 // Cloudflare bindings type
-export interface Env extends WebhookTriggerEnv {
+export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // D1 Database
   DATABASE: D1Database;
   // KV for sessions
