@@ -19,10 +19,14 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 class FakeWebSocket {
+  static last: FakeWebSocket | null = null;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  onmessage: ((e: unknown) => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  constructor() {
+    FakeWebSocket.last = this;
+  }
   close() {}
   send() {}
 }
@@ -44,6 +48,24 @@ describe('useNotifications — malformed payload resilience', () => {
     expect(result.current.notifications).toEqual([]);
     expect(result.current.unreadCount).toBe(0);
     expect(result.current.hasMore).toBe(false);
+  });
+
+  it('ignores WebSocket frames whose notification payload is malformed', async () => {
+    mockListNotifications.mockResolvedValue({ notifications: [], unreadCount: 0, nextCursor: null });
+
+    const { result } = renderHook(() => useNotifications());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const ws = FakeWebSocket.last!;
+    // Open the socket, then push a notification.new with no notification object
+    // and an updated frame with a junk payload — neither may poison the list.
+    await waitFor(() => expect(ws.onopen).not.toBeNull());
+    ws.onopen?.();
+    ws.onmessage?.({ data: JSON.stringify({ type: 'notification.new' }) });
+    ws.onmessage?.({ data: JSON.stringify({ type: 'notification.updated', notification: 42 }) });
+
+    expect(result.current.notifications).toEqual([]);
+    expect(result.current.unreadCount).toBe(0);
   });
 
   it('keeps a valid payload intact', async () => {

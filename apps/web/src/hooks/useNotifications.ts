@@ -146,13 +146,22 @@ export function useNotifications(): UseNotificationsReturn {
             const rawMsg = expectJsonRecord(JSON.parse(event.data), 'notifications.websocket.message');
             const msg = rawMsg as unknown as NotificationWsMessage;
 
+            // Same shape guard as the REST path: a malformed frame must not
+            // insert undefined into the list — the crash it causes happens in
+            // a later render, outside this try/catch.
+            const hasValidNotification =
+              (msg.type === 'notification.new' || msg.type === 'notification.updated') &&
+              typeof (msg as { notification?: { id?: unknown } }).notification?.id === 'string';
+
             switch (msg.type) {
               case 'notification.new':
+                if (!hasValidNotification) break;
                 setNotifications((prev) => [msg.notification, ...prev]);
                 setUnreadCount((prev) => prev + 1);
                 break;
 
               case 'notification.updated': {
+                if (!hasValidNotification) break;
                 // Reconcile unreadCount if readAt status changed
                 setNotifications((prev) => {
                   const existing = prev.find((n) => n.id === msg.notification.id);
