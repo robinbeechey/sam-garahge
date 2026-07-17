@@ -49,9 +49,12 @@ export function useNotifications(): UseNotificationsReturn {
       setLoading(true);
       const result = await listNotifications({ limit: 50 });
       if (!mountedRef.current) return;
-      setNotifications(result.notifications);
-      setUnreadCount(result.unreadCount);
-      setNextCursor(result.nextCursor);
+      // Guard the shape: NotificationCenter renders in the app shell on every
+      // page, so a malformed payload here must degrade to an empty list — not
+      // crash the whole app through the ErrorBoundary (undefined.filter).
+      setNotifications(Array.isArray(result.notifications) ? result.notifications : []);
+      setUnreadCount(typeof result.unreadCount === 'number' ? result.unreadCount : 0);
+      setNextCursor(result.nextCursor ?? null);
     } catch (err) {
       console.error('Failed to fetch notifications:', err);
     } finally {
@@ -65,8 +68,9 @@ export function useNotifications(): UseNotificationsReturn {
     try {
       const result = await listNotifications({ cursor: nextCursor, limit: 50 });
       if (!mountedRef.current) return;
-      setNotifications((prev) => [...prev, ...result.notifications]);
-      setNextCursor(result.nextCursor);
+      const more = Array.isArray(result.notifications) ? result.notifications : [];
+      setNotifications((prev) => [...prev, ...more]);
+      setNextCursor(result.nextCursor ?? null);
     } catch (err) {
       console.error('Failed to load more notifications:', err);
     }

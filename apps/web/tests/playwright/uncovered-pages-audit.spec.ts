@@ -268,7 +268,29 @@ async function setupMocks(page: Page, options: { emptyWorkspaces?: boolean } = {
     if (path.startsWith('/api/credentials')) {
       return respond(200, [{ id: 'cred-1', provider: 'hetzner', status: 'valid', isActive: true }]);
     }
-    if (path === '/api/trial/status') return respond(200, { available: false });
+    if (path === '/api/trial/status' || path === '/api/trial-status') {
+      return respond(200, { available: false });
+    }
+    if (path === '/api/providers/catalog') {
+      return respond(200, {
+        catalogs: [
+          {
+            provider: 'hetzner',
+            defaultLocation: 'fsn1',
+            locations: [
+              { id: 'fsn1', name: 'Falkenstein', country: 'DE' },
+              { id: 'nbg1', name: 'Nuremberg', country: 'DE' },
+              { id: 'hel1', name: 'Helsinki', country: 'FI' },
+            ],
+            sizes: {
+              small: { type: 'cx22', price: '€3.99/mo', vcpu: 2, ramGb: 4, diskGb: 40 },
+              medium: { type: 'cx32', price: '€7.99/mo', vcpu: 4, ramGb: 8, diskGb: 80 },
+              large: { type: 'cx42', price: '€15.99/mo', vcpu: 8, ramGb: 16, diskGb: 160 },
+            },
+          },
+        ],
+      });
+    }
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
