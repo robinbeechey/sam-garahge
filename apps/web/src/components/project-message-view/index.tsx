@@ -11,7 +11,7 @@ import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client'
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
-import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getMessageToolContent } from '../../lib/api/sessions';
@@ -48,9 +48,33 @@ function nearestItemId(items: ConversationItem[], timestamp: number): string | u
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
 
+/**
+ * Measures the floating header's rendered height so the message list can pad
+ * itself by the real value. The header stack (title wrapping to two lines,
+ * status badges, error banner, output summary) varies from ~56px to several
+ * hundred px — a fixed spacer leaves messages hidden behind the glass.
+ */
+function useFloatingHeaderHeight(): [RefObject<HTMLDivElement | null>, number] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [height, setHeight] = useState(56);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      setHeight((prev) => {
+        const next = Math.ceil(el.getBoundingClientRect().height);
+        return next > 0 && next !== prev ? next : prev;
+      });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, height];
+}
+
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
-  projectId, lc, onSessionMutated, onRetry, onFork, onOpenTimeline, sourceContext, onShowHierarchy,
+  projectId, lc, onSessionMutated, onRetry, onFork, onOpenTimeline, sourceContext, onShowHierarchy, containerRef,
 }: {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
@@ -60,6 +84,7 @@ function FloatingHeader({
   onOpenTimeline?: () => void;
   sourceContext?: SessionSourceContext;
   onShowHierarchy?: (taskId: string) => void;
+  containerRef?: RefObject<HTMLDivElement | null>;
 }) {
   if (!lc.session) return null;
   const initialPromptFallback = !lc.hasMore
@@ -75,7 +100,7 @@ function FloatingHeader({
   );
 
   return (
-    <div className="absolute top-0 left-0 right-0 z-10">
+    <div ref={containerRef} className="absolute top-0 left-0 right-0 z-10">
       <SessionHeader
         projectId={projectId}
         session={lc.session}
@@ -207,6 +232,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onNewChat,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
 
@@ -410,8 +436,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
         <div className="flex-1 min-h-0 flex flex-col relative">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
-          <div className="flex flex-1 items-center justify-center pt-14">
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} containerRef={floatingHeaderRef} />
+          <div className="flex flex-1 items-center justify-center" style={{ paddingTop: floatingHeaderHeight }}>
             <span className="text-fg-muted text-sm">
               {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
             </span>
@@ -419,7 +445,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       ) : (
         <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
+          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} containerRef={floatingHeaderRef} />
           <div className="flex-1 min-h-0">
             <Virtuoso
               ref={virtuosoRef}
@@ -447,8 +473,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               components={{
                 Header: () => (
                   <>
-                    {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden behind it */}
-                    <div className="h-14" />
+                    {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden
+                        behind it — tracks the measured header height (title wrap, badges, error
+                        banner, and summary all change it). The extra 8px keeps the first message
+                        clear of the glass edge. */}
+                    <div style={{ height: floatingHeaderHeight + 8 }} />
                     {lc.hasMore && (
                       <div className="text-center py-3">
                         <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
