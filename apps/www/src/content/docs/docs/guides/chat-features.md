@@ -130,13 +130,13 @@ When forking, SAM uses Workers AI to generate a concise summary of the conversat
 
 For short conversations (5 or fewer messages), the messages are passed directly without AI summarization. For longer conversations, a model generates a focused summary.
 
-| Variable                          | Default                     | Description                          |
-| --------------------------------- | --------------------------- | ------------------------------------ |
+| Variable                          | Default                         | Description                          |
+| --------------------------------- | ------------------------------- | ------------------------------------ |
 | `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-4-26b-a4b-it` | Model for context summarization      |
-| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                      | Max summary length (characters)      |
-| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                     | Summarization timeout                |
-| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                        | Max messages to include              |
-| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                         | Skip AI for conversations this short |
+| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                          | Max summary length (characters)      |
+| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                         | Summarization timeout                |
+| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                            | Max messages to include              |
+| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                             | Skip AI for conversations this short |
 
 ### Fork Limits
 
@@ -162,9 +162,13 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 When you open a new chat, SAM offers a few repo-aware **starter prompts** (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
 
+To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
+
 ## Session Filters (Shared Projects)
 
 In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search lets you switch between **my sessions** and **all sessions** so you can focus on your own work or see everything happening in the project.
+
+For the full team workflow — inviting people, approving access, roles, and shared resources — see [Collaboration & Shared Projects](/docs/guides/collaboration/).
 
 ## Focus Mode
 
